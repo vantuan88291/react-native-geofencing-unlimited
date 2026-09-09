@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Library manifest for AGP >= 7.3 — namespace comes from `android/build.gradle`, so
+  there is no `package` attribute here (§6.2).
+
+  This file and `AndroidManifest.xml` must stay **identical apart from that
+  attribute**. `android/build.gradle` picks one of them based on `supportsNamespace()`,
+  and adding a receiver to only this one — the file an IDE opens by default, and the
+  one actually used on modern AGP — leaves the module inert on any host still on
+  AGP < 7.3.
+
+  AGP merges all of this into the host app's manifest, so a consuming app declares
+  nothing. The relative names (`.GeofenceBroadcastReceiver`) resolve against this
+  library's namespace, not the host's, so they need no change per host.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!--
+      Without this, geofence transitions are NOT delivered in the background on
+      API 29+ — which is the entire use case. It also triggers Google Play's
+      background-location declaration and a manual review, so a host app that only
+      needs foreground geofencing can strip it: the Expo plugin does that via
+      `isAndroidBackgroundLocationEnabled: false`, and a bare RN app can do the same
+      with `tools:node="remove"` in its own manifest (§18.2).
+    -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!--
+      Only exercised when `enableHeadless: true` (§6.5). With the default
+      `enableHeadless: false` there is no service, no notification and no use of
+      these at all; the Expo plugin removes them when
+      `isAndroidForegroundServiceEnabled` is false.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+
+        <!--
+          Target of the shared PendingIntent handed to GeofencingClient (§6.3).
+          `exported="false"`: only Play Services, running under our own delivery,
+          reaches it.
+
+          NEVER add `android:process` to this or to anything else below.
+          SharedPreferences is not multi-process safe, and the two in-memory copies
+          would diverge with one silently overwriting the other (§9.4, invariant 8).
+        -->
+        <receiver
+            android:name=".GeofenceBroadcastReceiver"
+            android:exported="false" />
+
+        <!--
+          Re-arms from the store after the OS has dropped every registration (§6.6).
+          Deliberately no LOCKED_BOOT_COMPLETED: it fires before the first unlock,
+          when this module's credential-encrypted prefs cannot be read (§9.7).
+        -->
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.location.PROVIDERS_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Started only when `enableHeadless: true` (§6.5). -->
+        <service
+            android:name=".GeofenceHeadlessService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
+    </application>
+
+</manifest>

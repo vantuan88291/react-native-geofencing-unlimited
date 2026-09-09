@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "outDir": "build",
+    "rootDir": "src",
+    "declaration": true,
+    "composite": true,
+    "module": "node16",
+    "moduleResolution": "node16",
+    "target": "ES2019",
+    "lib": ["ES2019"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": false,
+    "types": ["node"]
+  },
+  "include": ["./src"],
+  "exclude": ["**/__mocks__/*", "**/__tests__/*"]
+}

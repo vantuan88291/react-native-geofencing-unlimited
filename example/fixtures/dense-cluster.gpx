@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Crosses the seeded dense cluster west-to-east in 10 m steps.
+
+  This is the §4.3 DEGENERATE CASE, and it is expected to be imperfect. 25 regions
+  sit inside ~120 m, which is more than iOS has slots for, so
+  `safeZone - BOUNDARY_SAFETY_MARGIN_M` falls below MIN_BOUNDARY_RADIUS_M and the
+  clamp produces a 500 m boundary that OVERLAPS excluded regions. A missed ENTER
+  here is the documented cost of a 20-region budget, not a bug.
+
+  What to watch:
+    - The module logs a "dense geofence cluster" warning (needs `debug: true`).
+    - The Boundary panel shows radius 500 m — the clamped minimum.
+    - Some cluster regions may never report an ENTER. That is the point of the
+      fixture: it makes the limitation visible instead of theoretical.
+
+  Use with: seed "Dense cluster (25 in 120 m)" first.
+-->
+<gpx version="1.1" creator="react-native-geofencing example" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>Dense cluster traverse</name>
+    <trkseg>
+      <trkpt lat="59.913900" lon="10.746824"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.747003"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.747183"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.747362"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.747541"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.747720"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.747899"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.748078"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.748258"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.748437"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.748616"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.748795"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.748974"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.749154"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.749333"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.749512"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.749691"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.749870"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.750050"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.750229"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.750408"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.750587"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.750766"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.750946"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.751125"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.751304"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.751483"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.751662"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.751842"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.752021"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.752379"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.752558"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.752738"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.752917"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.753096"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.753275"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.753454"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.753634"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.753813"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.753992"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.754171"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.754350"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.754530"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.754709"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.754888"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.755067"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.755246"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.755426"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.755605"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.755784"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.755963"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.756142"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.756322"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.756501"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.756680"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.756859"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.757038"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.757217"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.757397"><ele>10</ele></trkpt>
+      <trkpt lat="59.913900" lon="10.757576"><ele>10</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

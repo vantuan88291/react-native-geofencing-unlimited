@@ -1,0 +1,174 @@
+{
+  "name": "react-native-geofencing",
+  "version": "1.0.0",
+  "description": "Standalone geofencing native module for React Native: unlimited circular geofences with active-set rotation, background and killed-app delivery.",
+  "source": "./src/index.tsx",
+  "main": "./lib/commonjs/index.js",
+  "module": "./lib/module/index.js",
+  "types": "./lib/typescript/module/src/index.d.ts",
+  "exports": {
+    ".": {
+      "react-native-geofencing-source": "./src/index.tsx",
+      "import": {
+        "types": "./lib/typescript/module/src/index.d.ts",
+        "default": "./lib/module/index.js"
+      },
+      "require": {
+        "types": "./lib/typescript/commonjs/src/index.d.ts",
+        "default": "./lib/commonjs/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "lib",
+    "android",
+    "ios",
+    "cpp",
+    "*.podspec",
+    "react-native.config.js",
+    "app.plugin.js",
+    "plugin",
+    "!plugin/src",
+    "!plugin/tsconfig.json",
+    "!ios/build",
+    "!android/build",
+    "!android/gradle",
+    "!android/gradlew",
+    "!android/gradlew.bat",
+    "!android/local.properties",
+    "!**/*.tsbuildinfo",
+    "!android/src/test",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__",
+    "!**/.*"
+  ],
+  "scripts": {
+    "example": "yarn workspace react-native-geofencing-example",
+    "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib plugin/build",
+    "prepare": "bob build",
+    "build-plugin": "tsc --build plugin",
+    "typecheck": "tsc",
+    "lint": "eslint \"**/*.{js,ts,tsx}\"",
+    "test": "jest"
+  },
+  "keywords": [
+    "react-native",
+    "ios",
+    "android",
+    "geofence",
+    "geofencing",
+    "location",
+    "background-location",
+    "expo"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vantuan88291/react-native-geofencing.git"
+  },
+  "author": "vantuan88291 <levi.le@apricusventures.sg> (https://github.com/vantuan88291)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/vantuan88291/react-native-geofencing/issues"
+  },
+  "homepage": "https://github.com/vantuan88291/react-native-geofencing#readme",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "devDependencies": {
+    "@eslint/compat": "^2.1.0",
+    "@eslint/eslintrc": "^3.3.6",
+    "@eslint/js": "^9.39.5",
+    "@expo/config-plugins": "^57.0.0",
+    "@jest/globals": "^29.7.0",
+    "@react-native/babel-preset": "0.87.1",
+    "@react-native/eslint-config": "0.86.2",
+    "@react-native/jest-preset": "0.86.2",
+    "@types/react": "^19.2.0",
+    "del-cli": "^7.0.0",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-ft-flow": "^3.0.11",
+    "eslint-plugin-prettier": "^5.5.6",
+    "jest": "^29.7.0",
+    "prettier": "^3.9.6",
+    "react": "19.2.3",
+    "react-native": "0.87.1",
+    "react-native-builder-bob": "^0.43.0",
+    "turbo": "^2.10.8",
+    "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  },
+  "workspaces": [
+    "example"
+  ],
+  "packageManager": "yarn@4.11.0",
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      [
+        "commonjs",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "module",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "typescript",
+        {
+          "project": "tsconfig.build.json"
+        }
+      ]
+    ]
+  },
+  "codegenConfig": {
+    "name": "RNGeofencingSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.rngeofencing"
+    }
+  },
+  "prettier": {
+    "quoteProps": "consistent",
+    "singleQuote": true,
+    "tabWidth": 2,
+    "trailingComma": "es5",
+    "useTabs": false
+  },
+  "jest": {
+    "preset": "@react-native/jest-preset",
+    "testEnvironmentOptions": {
+      "customExportConditions": [
+        "require",
+        "react-native",
+        "react-native-geofencing-source"
+      ]
+    },
+    "modulePathIgnorePatterns": [
+      "<rootDir>/example/node_modules",
+      "<rootDir>/lib/",
+      "<rootDir>/plugin/build/"
+    ]
+  },
+  "create-react-native-library": {
+    "type": "turbo-module",
+    "languages": "kotlin-objc",
+    "tools": [
+      "eslint",
+      "jest"
+    ],
+    "version": "0.63.1"
+  }
+}

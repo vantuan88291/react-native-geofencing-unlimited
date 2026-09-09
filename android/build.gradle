@@ -1,0 +1,150 @@
+buildscript {
+  // Library defaults. A host app's `rootProject.ext` overrides every one of them via
+  // getExtOrDefault / getExtOrIntegerDefault below.
+  //
+  // These are floors, not preferences (§6.1): this module needs
+  //   compileSdk >= 34  — play-services-location:21.3.0 is compiled against 34,
+  //                       FOREGROUND_SERVICE_LOCATION is an API-34 permission and
+  //                       POST_NOTIFICATIONS is API 33 (§6.7)
+  //   Kotlin    >= 1.9  — for the coroutines and PermissionAwareActivity usage
+  // Do not lower them. A host app still pinning compileSdk 31 will not build, and
+  // that is on purpose — see the README.
+  ext.Geofencing = [
+    kotlinVersion: "2.0.21",
+    minSdkVersion: 24,
+    compileSdkVersion: 36,
+    targetSdkVersion: 36,
+    playServicesLocationVersion: "21.3.0"
+  ]
+
+  ext.getExtOrDefault = { prop ->
+    if (rootProject.ext.has(prop)) {
+      return rootProject.ext.get(prop)
+    }
+
+    return Geofencing[prop]
+  }
+
+  repositories {
+    google()
+    mavenCentral()
+  }
+
+  dependencies {
+    classpath "com.android.tools.build:gradle:8.7.2"
+    // noinspection DifferentKotlinGradleVersion
+    classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:${getExtOrDefault('kotlinVersion')}"
+  }
+}
+
+def getExtOrIntegerDefault(prop) {
+  return rootProject.ext.has(prop) ? rootProject.ext.get(prop) : Geofencing[prop].toInteger()
+}
+
+/**
+ * `newArchEnabled` is set in the **app's** android/gradle.properties, so it has to be
+ * read off `rootProject` (§15.3). Reading it from this library subproject finds
+ * nothing and silently builds the legacy path under a new-arch host — which compiles
+ * cleanly and then fails at runtime, on the host's app, in someone else's project.
+ */
+def isNewArchitectureEnabled() {
+  return rootProject.hasProperty("newArchEnabled") && rootProject.getProperty("newArchEnabled") == "true"
+}
+
+/**
+ * AGP gained the `namespace` DSL in 7.3. Below that the library manifest must carry a
+ * `package` attribute instead, which is why this module ships two manifests (§6.2).
+ */
+def supportsNamespace() {
+  def parsed = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION.tokenize('.')
+  def major = parsed[0].toInteger()
+  def minor = parsed[1].toInteger()
+
+  if (major == 7 && minor >= 3) {
+    return true
+  }
+
+  return major >= 8
+}
+
+apply plugin: "com.android.library"
+
+if (project.extensions.findByName("kotlin") == null) {
+  apply plugin: "kotlin-android"
+}
+
+// Applied only under the New Architecture: this is what puts the codegen-emitted
+// `NativeGeofencingSpec` on the compile path for src/newarch (§6.1, §15.3). On a
+// legacy build there is no codegen at all, and src/oldarch supplies the abstract
+// class instead.
+if (isNewArchitectureEnabled()) {
+  apply plugin: "com.facebook.react"
+}
+
+android {
+  if (supportsNamespace()) {
+    namespace "com.rngeofencing"
+
+    sourceSets {
+      main {
+        manifest.srcFile "src/main/AndroidManifestNew.xml"
+      }
+    }
+  }
+
+  compileSdkVersion getExtOrIntegerDefault("compileSdkVersion")
+
+  defaultConfig {
+    minSdkVersion getExtOrIntegerDefault("minSdkVersion")
+
+    // Read by GeofencingPackage to decide `isTurboModule` (§15.3).
+    buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+  }
+
+  buildFeatures {
+    buildConfig true
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  sourceSets {
+    main {
+      // Only the two hand-written directories are listed. The generated spec reaches
+      // the compile path through the react gradle plugin and the `react { }` block
+      // below, never through srcDirs — this package ships no generated code (§11).
+      if (isNewArchitectureEnabled()) {
+        java.srcDirs += ["src/newarch"]
+      } else {
+        java.srcDirs += ["src/oldarch"]
+      }
+    }
+  }
+}
+
+dependencies {
+  implementation "com.facebook.react:react-android"
+  implementation "org.jetbrains.kotlin:kotlin-stdlib:${getExtOrDefault('kotlinVersion')}"
+
+  // The only real dependency this module adds. GeofencingClient lives here, and so
+  // does FusedLocationProviderClient for the §4.7 centre resolution.
+  implementation "com.google.android.gms:play-services-location:${getExtOrDefault('playServicesLocationVersion')}"
+
+  // No database dependency: persistence is SharedPreferences (§9). org.json ships
+  // with the platform, so there is no JSON library either.
+
+  // The §14 unit tests: the rotation engine, the transition gate and the geometry are
+  // driven on a plain JVM through the GeofenceStore / RegionRegistry interfaces, with
+  // no device, no Play Services and no Robolectric.
+  testImplementation "junit:junit:4.13.2"
+}
+
+if (isNewArchitectureEnabled()) {
+  react {
+    jsRootDir = file("../src/")
+    libraryName = "Geofencing"
+    codegenJavaPackageName = "com.rngeofencing"
+  }
+}

@@ -1,0 +1,310 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  merge_group:
+    types:
+      - checks_requested
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Lint files
+        run: yarn lint
+
+      - name: Typecheck files
+        run: yarn typecheck
+
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Run unit tests
+        run: yarn test --maxWorkers=2 --coverage
+
+  build-library:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Build package
+        run: yarn prepare
+
+  build-android:
+    runs-on: ubuntu-latest
+
+    # Both architectures. This is the one thing CI must cover that a developer will
+    # not: a module that compiles under the New Architecture and fails under the
+    # legacy bridge (or the reverse) is the standard failure mode of §15, and it stays
+    # invisible until it breaks in someone else's app.
+    strategy:
+      fail-fast: false
+      matrix:
+        newArchEnabled: [true, false]
+
+    name: build-android (newArch=${{ matrix.newArchEnabled }})
+
+    env:
+      TURBO_CACHE_DIR: .turbo/android-${{ matrix.newArchEnabled }}
+      # Declared as a turbo cache key in turbo.json. Without that, a cached build is
+      # replayed across a switch and the matrix quietly tests one arch twice.
+      ORG_GRADLE_PROJECT_newArchEnabled: ${{ matrix.newArchEnabled }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Cache turborepo for Android
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ env.TURBO_CACHE_DIR }}
+          key: ${{ runner.os }}-turborepo-android-${{ matrix.newArchEnabled }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-turborepo-android-${{ matrix.newArchEnabled }}-
+
+      - name: Check turborepo cache for Android
+        run: |
+          TURBO_CACHE_STATUS=$(node -p "($(yarn turbo run build:android --cache-dir="${{ env.TURBO_CACHE_DIR }}" --dry=json)).tasks.find(t => t.task === 'build:android').cache.status")
+
+          if [[ $TURBO_CACHE_STATUS == "HIT" ]]; then
+            echo "turbo_cache_hit=1" >> $GITHUB_ENV
+          fi
+
+      - name: Install JDK
+        if: env.turbo_cache_hit != 1
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Finalize Android SDK
+        if: env.turbo_cache_hit != 1
+        run: |
+          /bin/bash -c "yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null"
+
+
+      - name: Cache Gradle
+        if: env.turbo_cache_hit != 1
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.gradle/wrapper
+            ~/.gradle/caches
+          key: ${{ runner.os }}-gradle-${{ hashFiles('example/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Build example for Android
+        env:
+          JAVA_OPTS: "-XX:MaxHeapSize=6g"
+        run: |
+          yarn turbo run build:android --cache-dir="${{ env.TURBO_CACHE_DIR }}"
+
+  build-ios:
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        newArchEnabled: ['1', '0']
+
+    name: build-ios (RCT_NEW_ARCH_ENABLED=${{ matrix.newArchEnabled }})
+
+    env:
+      XCODE_VERSION: 26
+      TURBO_CACHE_DIR: .turbo/ios-${{ matrix.newArchEnabled }}
+      # Read by `pod install` and by the __has_include guard in ios/RNGeofencing.h.
+      RCT_NEW_ARCH_ENABLED: ${{ matrix.newArchEnabled }}
+      RCT_USE_RN_DEP: 1
+      RCT_USE_PREBUILT_RNCORE: 1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Cache turborepo for iOS
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ env.TURBO_CACHE_DIR }}
+          key: ${{ runner.os }}-turborepo-ios-${{ matrix.newArchEnabled }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-turborepo-ios-${{ matrix.newArchEnabled }}-
+
+      - name: Check turborepo cache for iOS
+        run: |
+          TURBO_CACHE_STATUS=$(node -p "($(yarn turbo run build:ios --cache-dir="${{ env.TURBO_CACHE_DIR }}" --dry=json)).tasks.find(t => t.task === 'build:ios').cache.status")
+
+          if [[ $TURBO_CACHE_STATUS == "HIT" ]]; then
+            echo "turbo_cache_hit=1" >> $GITHUB_ENV
+          fi
+
+      - name: Use appropriate Xcode version
+        if: env.turbo_cache_hit != 1
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Install cocoapods
+        if: env.turbo_cache_hit != 1 && steps.cocoapods-cache.outputs.cache-hit != 'true'
+        run: |
+          cd example
+          bundle install
+          bundle exec pod repo update --verbose
+          bundle exec pod install --project-directory=ios
+
+      - name: Build example for iOS
+        run: |
+          yarn turbo run build:ios --cache-dir="${{ env.TURBO_CACHE_DIR }}"
+
+  # `plugin/build/` is committed and shipped in `files`, and `prepare` runs `bob build`
+  # only — which does not touch `plugin/`. So nothing regenerates it at publish time,
+  # and a forgotten `yarn build-plugin` ships a plugin that silently applies the
+  # PREVIOUS version's mods. This job is what catches that (§17.1, §18.1).
+  build-plugin:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Build the Expo config plugin
+        run: yarn build-plugin
+
+      - name: Fail if plugin/build differs from the committed copy
+        run: |
+          if ! git diff --exit-code -- plugin/build; then
+            echo "::error::plugin/build/ is stale. Run 'yarn build-plugin' and commit the output."
+            exit 1
+          fi
+
+  # NOT optional padding. A project on the target workflow runs `expo prebuild` on
+  # EVERY build, so a plugin mod that stops applying breaks every subsequent build's
+  # configuration — silently, with a green test suite. This is the one failure in the
+  # whole module that CI can catch and a human reliably will not (§17.2, §18.4).
+  expo-prebuild-check:
+    # macOS, not ubuntu: this job reads the generated Info.plist with PlistBuddy.
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Build the library and the plugin
+        run: |
+          yarn prepare
+          yarn build-plugin
+
+      - name: Pack the library
+        id: pack
+        run: echo "tarball=$(yarn pack --out /tmp/rn-geofencing.tgz >/dev/null && echo /tmp/rn-geofencing.tgz)" >> "$GITHUB_OUTPUT"
+
+      - name: Create a throwaway Expo app and apply the plugin
+        run: |
+          cd /tmp
+          npx --yes create-expo-app@latest geo-check --template blank-typescript --yes
+          cd geo-check
+          yarn add "${{ steps.pack.outputs.tarball }}"
+          node -e "
+            const fs = require('fs');
+            const app = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+            app.expo.plugins = [
+              ['react-native-geofencing', {
+                locationAlwaysAndWhenInUsePermission: 'Test always usage description.',
+              }],
+            ];
+            fs.writeFileSync('app.json', JSON.stringify(app, null, 2));
+          "
+          npx expo prebuild --no-install
+
+      - name: Assert the Info.plist keys and the background mode landed
+        run: |
+          cd /tmp/geo-check
+          PLIST=$(ls ios/*/Info.plist | head -1)
+          echo "checking $PLIST"
+          for key in NSLocationWhenInUseUsageDescription NSLocationAlwaysAndWhenInUseUsageDescription; do
+            /usr/libexec/PlistBuddy -c "Print :$key" "$PLIST" 2>/dev/null \
+              || { echo "::error::$key missing from Info.plist — the plugin mod did not apply"; exit 1; }
+          done
+          /usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" "$PLIST" | grep -q location \
+            || { echo "::error::UIBackgroundModes is missing 'location'"; exit 1; }
+
+      - name: Assert the launch hook is linked, not written into AppDelegate
+        run: |
+          cd /tmp/geo-check
+          # Mechanism C (§18.3): the hook lives in the library's own +load, so there
+          # must be NOTHING in the generated AppDelegate. If a future change switches
+          # to mechanism B, this assertion is what forces the check to be updated too.
+          if grep -rn "RNGeofencingCore" ios/*/AppDelegate.* 2>/dev/null; then
+            echo "::error::AppDelegate was modified. This library ships mechanism C; update this check if that changed deliberately."
+            exit 1
+          fi
+          grep -q "react-native-geofencing" ios/Podfile.lock \
+            || { echo "::error::the pod was not linked, so +load can never run"; exit 1; }
+
+      - name: Second prebuild WITHOUT --clean — mods must be idempotent
+        run: |
+          cd /tmp/geo-check
+          npx expo prebuild --no-install
+          # A doubled UIBackgroundModes entry is the §18.4 failure this catches.
+          PLIST=$(ls ios/*/Info.plist | head -1)
+          COUNT=$(/usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" "$PLIST" | grep -c location)
+          if [ "$COUNT" -ne 1 ]; then
+            echo "::error::UIBackgroundModes has $COUNT 'location' entries after two prebuilds — a mod is not idempotent"
+            exit 1
+          fi
+
+      - name: Assert the background-location opt-out still works
+        run: |
+          cd /tmp/geo-check
+          node -e "
+            const fs = require('fs');
+            const app = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+            app.expo.plugins = [
+              ['react-native-geofencing', { isAndroidBackgroundLocationEnabled: false }],
+            ];
+            fs.writeFileSync('app.json', JSON.stringify(app, null, 2));
+          "
+          npx expo prebuild --clean --no-install
+          # A silently reappearing background-location permission is a Play Store
+          # review problem discovered at submission time (§18.4).
+          grep -q 'ACCESS_BACKGROUND_LOCATION.*tools:node="remove"' android/app/src/main/AndroidManifest.xml \
+            || { echo "::error::the ACCESS_BACKGROUND_LOCATION opt-out stopped working"; exit 1; }

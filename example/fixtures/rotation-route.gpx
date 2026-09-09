@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Drives 12 km due north from the seed centre in 150 m steps.
+
+  What to watch (the §13 phase-5 done condition):
+    - `getActiveGeofences()` changes as you move — the armed set must always be the
+      nearest N, which the example's Registry panel shows sorted by distance.
+    - `onGeofencesChange` fires repeatedly. The Boundary panel's centre and radius
+      must update with it; when they stop, rotation has stalled.
+    - ENTER/EXIT pairs appear in the event log for the seeded regions you pass
+      through.
+
+  Use with: seed "Add 300" first.
+  Xcode: Debug > Simulate Location > Add GPX File to Workspace.
+  Android emulator: Extended Controls > Location > Routes > Import GPX.
+-->
+<gpx version="1.1" creator="react-native-geofencing example" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>Rotation route — 12 km north</name>
+    <trkseg>
+      <trkpt lat="59.913900" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.915247" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.916595" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.917942" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.919290" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.920637" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.921985" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.923332" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.924680" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.926027" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.927375" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.928722" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.930070" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.931417" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.932765" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.934112" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.935459" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.936807" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.938154" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.939502" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.940849" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.942197" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.943544" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.944892" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.946239" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.947587" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.948934" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.950282" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.951629" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.952977" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.954324" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.955671" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.957019" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.958366" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.959714" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.961061" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.962409" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.963756" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.965104" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.966451" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.967799" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.969146" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.970494" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.971841" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.973189" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.974536" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.975883" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.977231" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.978578" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.979926" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.981273" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.982621" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.983968" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.985316" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.986663" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.988011" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.989358" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.990706" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.992053" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.993401" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.994748" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.996095" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.997443" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="59.998790" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.000138" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.001485" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.002833" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.004180" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.005528" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.006875" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.008223" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.009570" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.010918" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.012265" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.013613" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.014960" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.016307" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.017655" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.019002" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.020350" lon="10.752200"><ele>10</ele></trkpt>
+      <trkpt lat="60.021697" lon="10.752200"><ele>10</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>
