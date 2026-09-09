@@ -1,5 +1,5 @@
 import { AppRegistry } from 'react-native';
-import { Geofencing } from 'react-native-geofencing';
+import { Geofencing } from 'react-native-geofencing-unlimited';
 import App from './src/App';
 import { appendEvents } from './src/eventLog';
 import { name as appName } from './app.json';

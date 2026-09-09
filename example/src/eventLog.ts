@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { GeofenceEvent } from 'react-native-geofencing';
+import type { GeofenceEvent } from 'react-native-geofencing-unlimited';
 
 /**
  * The event log, persisted (§16).

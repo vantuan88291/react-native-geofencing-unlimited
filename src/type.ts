@@ -1,5 +1,5 @@
 /**
- * Public types for `react-native-geofencing`.
+ * Public types for `react-native-geofencing-unlimited`.
  *
  * These are hand-written and are the contract (§15.5): the codegen spec in
  * `NativeGeofencing.ts` speaks a narrower dialect (no string-literal unions, `extras`

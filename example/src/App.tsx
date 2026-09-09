@@ -14,7 +14,7 @@ import {
   type GeofencesChange,
   type GeofencingState,
   type RegisteredGeofence,
-} from 'react-native-geofencing';
+} from 'react-native-geofencing-unlimited';
 import { appendEvents, clearLog, readLog, type LogEntry } from './eventLog';
 import {
   distanceMetres,
@@ -148,7 +148,7 @@ export default function App() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>react-native-geofencing</Text>
+      <Text style={styles.title}>react-native-geofencing-unlimited</Text>
       <Text style={styles.subtitle}>
         {Platform.OS} · {Platform.OS === 'ios' ? '19 of 20' : '99 of 100'} slots
         usable

@@ -1,4 +1,4 @@
-# react-native-geofencing
+# react-native-geofencing-unlimited
 
 Unlimited circular geofences for React Native, with background and killed-app delivery.
 
@@ -10,7 +10,7 @@ Works with both the **React Native CLI** and **Expo** (prebuild / EAS Build), un
 Architecture and the legacy bridge.
 
 ```ts
-import { Geofencing } from 'react-native-geofencing';
+import { Geofencing } from 'react-native-geofencing-unlimited';
 
 await Geofencing.ready({ proximityRadius: 2000 });
 await Geofencing.requestPermission();
@@ -54,7 +54,7 @@ reports "you have moved far enough that the cached nearest-N is stale".
 ## Install
 
 ```sh
-yarn add react-native-geofencing
+yarn add react-native-geofencing-unlimited
 ```
 
 Minimum versions:
@@ -79,7 +79,7 @@ Add the plugin to `app.json`:
   "expo": {
     "plugins": [
       [
-        "react-native-geofencing",
+        "react-native-geofencing-unlimited",
         {
           "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location to notify you when you arrive.",
           "isAndroidBackgroundLocationEnabled": true
@@ -215,7 +215,7 @@ tree — the headless bundle runs before any component mounts:
 
 ```js
 // index.js
-import { Geofencing } from 'react-native-geofencing';
+import { Geofencing } from 'react-native-geofencing-unlimited';
 
 Geofencing.registerHeadlessTask(async (event) => {
   await recordArrival(event); // must not depend on your React tree

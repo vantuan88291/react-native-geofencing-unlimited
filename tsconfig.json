@@ -2,12 +2,12 @@
   "compilerOptions": {
     "rootDir": ".",
     "paths": {
-      "react-native-geofencing": ["./src/index"]
+      "react-native-geofencing-unlimited": ["./src/index"]
     },
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
     "customConditions": [
-      "react-native-geofencing-source",
+      "react-native-geofencing-unlimited-source",
       "react-native-strict-api"
     ],
     "esModuleInterop": true,

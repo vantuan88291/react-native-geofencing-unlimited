@@ -11,7 +11,7 @@ Pod::Spec.new do |s|
   s.authors      = package["author"]
 
   s.platforms    = { :ios => min_ios_version_supported }
-  s.source       = { :git => "https://github.com/vantuan88291/react-native-geofencing.git", :tag => "#{s.version}" }
+  s.source       = { :git => "https://github.com/vantuan88291/react-native-geofencing-unlimited.git", :tag => "#{s.version}" }
 
   # No `swift` in the glob, and that is deliberate (§11). The iOS side is ObjC++
   # throughout: a `.swift` file placed here would be silently not compiled, and adding

@@ -21,7 +21,7 @@ import type {
 export * from './type';
 
 const LINKING_ERROR =
-  `The package 'react-native-geofencing' doesn't seem to be linked. Make sure: \n\n` +
+  `The package 'react-native-geofencing-unlimited' doesn't seem to be linked. Make sure: \n\n` +
   Platform.select({ ios: "- You have run 'pod install'\n", default: '' }) +
   '- You rebuilt the app after installing the package\n' +
   '- You are not using Expo Go\n';
@@ -60,7 +60,7 @@ function encodeExtras(extras: Record<string, unknown> | undefined) {
     // A host app that hands us a cyclic object should get a clear failure here
     // rather than an opaque native store error later.
     throw new Error(
-      '[react-native-geofencing] `extras` must be JSON-serialisable'
+      '[react-native-geofencing-unlimited] `extras` must be JSON-serialisable'
     );
   }
 }
@@ -229,7 +229,10 @@ function ensureNativeSubscription() {
       try {
         listener(change);
       } catch (error) {
-        console.error('[react-native-geofencing] onGeofencesChange', error);
+        console.error(
+          '[react-native-geofencing-unlimited] onGeofencesChange',
+          error
+        );
       }
     });
   });
@@ -249,7 +252,7 @@ function dispatchEvent(event: GeofenceEvent) {
     try {
       listener(event);
     } catch (error) {
-      console.error('[react-native-geofencing] onGeofence', error);
+      console.error('[react-native-geofencing-unlimited] onGeofence', error);
     }
   });
 }
@@ -273,7 +276,10 @@ async function ready(config: GeofencingConfig = {}): Promise<GeofencingState> {
     const queued = await Native.flushQueue();
     queued.forEach((payload) => dispatchEvent(fromEventPayload(payload)));
   } catch (error) {
-    console.warn('[react-native-geofencing] flushQueue on ready failed', error);
+    console.warn(
+      '[react-native-geofencing-unlimited] flushQueue on ready failed',
+      error
+    );
   }
   return fromStateSpec(state);
 }
@@ -377,7 +383,7 @@ function onGeofence(callback: EventListener): Subscription {
       try {
         callback(event);
       } catch (error) {
-        console.error('[react-native-geofencing] onGeofence', error);
+        console.error('[react-native-geofencing-unlimited] onGeofence', error);
       }
     });
   }
@@ -426,7 +432,10 @@ function registerHeadlessTask(task: HeadlessGeofenceTask): void {
     try {
       payloads = JSON.parse(raw) as GeofenceEventPayload[];
     } catch (error) {
-      console.error('[react-native-geofencing] headless payload', error);
+      console.error(
+        '[react-native-geofencing-unlimited] headless payload',
+        error
+      );
       return;
     }
     for (const payload of payloads) {

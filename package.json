@@ -1,5 +1,5 @@
 {
-  "name": "react-native-geofencing",
+  "name": "react-native-geofencing-unlimited",
   "version": "1.0.0",
   "description": "Standalone geofencing native module for React Native: unlimited circular geofences with active-set rotation, background and killed-app delivery.",
   "source": "./src/index.tsx",
@@ -8,7 +8,7 @@
   "types": "./lib/typescript/module/src/index.d.ts",
   "exports": {
     ".": {
-      "react-native-geofencing-source": "./src/index.tsx",
+      "react-native-geofencing-unlimited-source": "./src/index.tsx",
       "import": {
         "types": "./lib/typescript/module/src/index.d.ts",
         "default": "./lib/module/index.js"
@@ -46,7 +46,7 @@
     "!**/.*"
   ],
   "scripts": {
-    "example": "yarn workspace react-native-geofencing-example",
+    "example": "yarn workspace react-native-geofencing-unlimited-example",
     "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib plugin/build",
     "prepare": "bob build",
     "build-plugin": "tsc --build plugin",
@@ -66,14 +66,14 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vantuan88291/react-native-geofencing.git"
+    "url": "git+https://github.com/vantuan88291/react-native-geofencing-unlimited.git"
   },
   "author": "vantuan88291 <levi.le@apricusventures.sg> (https://github.com/vantuan88291)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/vantuan88291/react-native-geofencing/issues"
+    "url": "https://github.com/vantuan88291/react-native-geofencing-unlimited/issues"
   },
-  "homepage": "https://github.com/vantuan88291/react-native-geofencing#readme",
+  "homepage": "https://github.com/vantuan88291/react-native-geofencing-unlimited#readme",
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
   },
@@ -153,7 +153,7 @@
       "customExportConditions": [
         "require",
         "react-native",
-        "react-native-geofencing-source"
+        "react-native-geofencing-unlimited-source"
       ]
     },
     "modulePathIgnorePatterns": [

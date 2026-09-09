@@ -1,4 +1,4 @@
-import type { Geofence } from 'react-native-geofencing';
+import type { Geofence } from 'react-native-geofencing-unlimited';
 
 export type LatLng = { latitude: number; longitude: number };
 
