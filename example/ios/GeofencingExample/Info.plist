@@ -28,27 +28,17 @@
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-	  <!-- Do not change NSAllowsArbitraryLoads to true, or you will risk app rejection! -->
 		<key>NSAllowsArbitraryLoads</key>
 		<false/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Shows which geofences you are inside while the app is open.</string>
-	<!--
-	  Region monitoring in the BACKGROUND requires authorizedAlways. With
-	  authorizedWhenInUse the OS does not deliver region events in the background,
-	  which is the entire use case (§7.1).
-	-->
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Notifies you when you arrive at or leave a place, even when the app is closed.</string>
-	<!--
-	  Required before CLLocationManager.allowsBackgroundLocationUpdates can be set;
-	  setting it without this raises an exception, which is why the module guards it.
-	  The Expo config plugin appends this for you (§18.2) — a bare React Native CLI
-	  host, like this example, declares it here.
-	-->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Shows which geofences you are inside while the app is open.</string>
+	<key>RCTNewArchEnabled</key>
+	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

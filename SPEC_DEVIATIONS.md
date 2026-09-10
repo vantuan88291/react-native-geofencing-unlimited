@@ -143,7 +143,28 @@ provide `tsconfig.plugin`.
 `expo-module-scripts` is not installed. One fewer Expo toolchain in a package that must stay usable
 by plain React Native consumers.
 
-## 9. The example app gained one dependency — §16
+## 9. The podspec is named after the npm package — §11.1
+
+§11.1's layout names the file `RNGeofencing.podspec`, which is also what the scaffold
+emitted (as `Geofencing.podspec`).
+
+**What was done:** renamed to `react-native-geofencing-unlimited.podspec`, with
+`s.name = package["name"]` so the pod name is *derived* rather than restated and the
+two can never drift apart again. This is the dominant convention among React Native
+libraries, and it is what `pod install` and the Xcode "Development Pods" group display.
+
+It changes nothing at runtime. The pod name is a CocoaPods packaging identifier only:
+the name React binds to is still `RNGeofencing` (`RCT_EXPORT_MODULE` in
+`ios/RNGeofencing.mm`, matched against `TurboModuleRegistry.get('RNGeofencing')` and
+`getName()` on Android, per §15.2). The ObjC classes keep their `RNGeofencing` prefix
+because the Objective-C runtime has a single flat class namespace.
+
+One consequence worth knowing: under `use_frameworks!` the module name becomes
+`react_native_geofencing_unlimited` (CocoaPods maps dashes to underscores), so a host
+app importing the public headers by angle bracket would write
+`<react_native_geofencing_unlimited/RNGeofencingCore.h>`.
+
+## 10. The example app gained one dependency — §16
 
 §16 requires the event log to **survive a process kill**, and to be written from the headless task
 as well as the React tree. That needs real persistence, so the example app depends on
@@ -169,7 +190,8 @@ Everything below needs hardware or a full app build, and none of it has been run
 | Packed tarball contents | **verified** |
 | Expo plugin mods, run twice for idempotence | **verified** (§18.4's doubling failure) |
 | iOS sources, `-Wall` syntax check against the iOS 26.5 SDK | **passing** for all 7 React-independent files |
-| `ios/RNGeofencing.mm` (the `RCTEventEmitter` surface) | **not compiled** — needs `pod install` |
+| `ios/RNGeofencing.mm` (the `RCTEventEmitter` surface) | **compiles clean under BOTH architectures** — exercises both sides of the `__has_include` guard in `RNGeofencing.h` (§15.4) |
+| `pod install` resolves and autolinks the pod | **verified** |
 | Full `example` Android build, both architectures | **not run** |
 | Full `example` iOS build, both architectures | **not run** |
 | Every device test in §14 | **not run** |

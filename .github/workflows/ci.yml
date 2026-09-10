@@ -277,7 +277,7 @@ jobs:
             echo "::error::AppDelegate was modified. This library ships mechanism C; update this check if that changed deliberately."
             exit 1
           fi
-          grep -q "RNGeofencing" ios/Podfile.lock \
+          grep -q "react-native-geofencing-unlimited" ios/Podfile.lock \
             || { echo "::error::the pod was not linked, so +load can never run"; exit 1; }
 
       - name: Second prebuild WITHOUT --clean — mods must be idempotent
