@@ -17,7 +17,12 @@ Architecture and the legacy bridge.
 ```ts
 import { Geofencing } from 'react-native-geofencing-unlimited';
 
-await Geofencing.ready({ proximityRadius: 2000 });
+// Subscribe first: ready() flushes whatever arrived while your JS was down.
+Geofencing.onGeofence((event) => {
+  console.log(event.action, event.identifier); // 'ENTER' | 'EXIT' | 'DWELL'
+});
+
+const state = await Geofencing.ready({ proximityRadius: 2000 });
 await Geofencing.requestPermission();
 
 await Geofencing.addGeofences(
@@ -32,11 +37,8 @@ await Geofencing.addGeofences(
   }))
 );
 
-await Geofencing.start();
-
-Geofencing.onGeofence((event) => {
-  console.log(event.action, event.identifier); // 'ENTER' | 'EXIT' | 'DWELL'
-});
+// `enabled` is persisted by the module, so this is a no-op on later launches.
+if (!state.enabled) await Geofencing.start();
 ```
 
 ## How it lifts the platform limits
@@ -242,19 +244,66 @@ const onToggle = (on: boolean) =>
 harmless, just wasteful: it forces an extra rotation, which may cost a fresh location
 fix.
 
-### First-time setup
+### Setup — safe to run on every launch
 
 ```ts
-Geofencing.onGeofence(handler);               // 1. subscribe first
-const state = await Geofencing.ready({ ... }); // 2. config + flush queue
-if (!state.available) return;                  // 3. bail on unsupported devices
-await Geofencing.requestPermission();          // 4. must reach 'always'
-await Geofencing.addGeofences(places);         // 5. add
-await Geofencing.start();                      // 6. arm — last
+Geofencing.onGeofence(handler);                 // 1. subscribe first
+const state = await Geofencing.ready({ ... });  // 2. config + flush queue
+if (!state.available) return;                   // 3. bail on unsupported devices
+if (state.authorization !== 'always') {         // 4. must reach 'always'
+  await Geofencing.requestPermission();
+}
+await Geofencing.addGeofences(places);          // 5. add
+if (!state.enabled) await Geofencing.start();   // 6. arm — only if not already armed
 ```
+
+Step 4 is guarded because an unconditional call is **not** free once the user has
+settled on "While Using the App" — the common case. On iOS `requestAlwaysAuthorization`
+is a one-shot per install; after it has been spent the call does nothing and fires no
+delegate callback, so the promise waits out its 30-second backstop *on every launch* —
+stalling everything after it. On Android API 30+ the background rationale dialog is
+shown again on every launch. Better still, ask behind a user action or a screen that
+explains the benefit: that is what Play policy expects, and it is granted far more often.
+
+Step 6 is guarded because **`enabled` is persisted by the module**. Calling `start()`
+unconditionally on every launch costs an extra rotation, and — once you add a settings
+toggle — silently switches the feature back on for a user who turned it off.
+
+Do **not** keep your own "have I started yet?" flag in AsyncStorage. It duplicates state
+the module already owns, and the two drift apart the first time anything calls `stop()`:
+your flag still says started, `enabled` says stopped, and nothing ever arms again.
+`ready()` hands you the real answer in its return value.
 
 Steps 5 and 6 are interchangeable, but **adding before starting costs one rotation
 instead of two** — starting first rotates over an empty set and wastes a location fix.
+
+### Removing a listener
+
+`onGeofence` and `onGeofencesChange` both return a `Subscription`. Remove it when the
+component that owns it goes away:
+
+```ts
+useEffect(() => {
+  const sub = Geofencing.onGeofence(handleGeofenceEvent);
+  return () => sub.remove();
+}, []);
+```
+
+Skip this and Fast Refresh or a remount stacks a second listener on the same event —
+your handler runs twice per crossing, and if it calls an API, so does that.
+
+**Removing a listener does not stop delivery.** The module keeps its native
+subscription for the lifetime of the JS context, and events that arrive with no
+listener attached are held (bounded at 200) and replayed to the next subscriber. So a
+remount loses nothing.
+
+What that buffer will not survive is the process being killed: events held for a
+missing listener were never written to the native queue, because native could see a
+live JS context and delivered to it. If losing a crossing is not acceptable — you are
+reporting arrivals to a backend, say — keep **one** listener alive for the whole
+process rather than only inside a screen: register it in a top-level component that
+never unmounts, and let that handler persist the event before anything else. Screens
+can then read from your own store instead of subscribing.
 
 ### Batch your adds
 
