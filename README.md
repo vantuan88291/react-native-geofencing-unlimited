@@ -95,6 +95,12 @@ Add the plugin to `app.json`:
 }
 ```
 
+That is the whole config for the **default** runtime options. `isAndroidBackgroundLocationEnabled`
+is already `true` by default and is spelled out above only for clarity. Going to call
+`ready({ enableHeadless: true })`? Then you need a third prop —
+`isAndroidForegroundServiceEnabled: true` — or your JS will not run at the crossing after all.
+The callout under the props table below spells out why.
+
 The plugin writes the `Info.plist` keys and appends `location` to `UIBackgroundModes` for you. A
 host that would rather own those can put them in `app.json` under `ios.infoPlist` and pass `false`
 for the matching props — with `prebuild` on every build, `app.json` is the natural source of truth.
@@ -116,15 +122,35 @@ Plugin props:
 > `enableHeadless` is still `true` and the module logs an error and leaves the events queued
 > rather than starting a service it knows will fail.
 >
-> The two are set in different places and neither knows about the other:
-> `enableHeadless` is a runtime option passed to `ready()`, while the permissions the
-> headless service needs are stripped from the merged manifest at *build* time by this
-> plugin, which defaults to removing them. Set one without the other and the service
-> cannot start — silently, with only a logcat warning.
+> The two are set in different places and neither knows about the other: `enableHeadless` is
+> a runtime argument to `ready()`, while these permissions are stripped from the merged
+> manifest at *build* time by this plugin, which defaults to removing them. Nothing can
+> compare them until the app runs — so `ready()` does it, and logs a `MISCONFIGURED:` line
+> the first time you call it with `enableHeadless: true` and no `WAKE_LOCK`. If you have
+> `debug: true` on, that line is also in `getDebugLog()`.
+>
+> The full copy-paste for the headless case:
 >
 > ```json
-> ["react-native-geofencing-unlimited", { "isAndroidForegroundServiceEnabled": true }]
+> {
+>   "expo": {
+>     "plugins": [
+>       [
+>         "react-native-geofencing-unlimited",
+>         {
+>           "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location to notify you when you arrive.",
+>           "isAndroidForegroundServiceEnabled": true
+>         }
+>       ]
+>     ]
+>   }
+> }
 > ```
+>
+> This is deliberately **not** the default above, and the prop is not free: it keeps
+> `FOREGROUND_SERVICE_LOCATION`, and Google Play requires every app carrying that permission
+> to declare its foreground-service use case in the Play Console. Turn it on because you
+> want headless delivery, not as insurance.
 
 **`compileSdk >= 34`:** set it with
 [`expo-build-properties`](https://docs.expo.dev/versions/latest/sdk/build-properties/), not by
@@ -348,12 +374,45 @@ location, and reporting it as success would be a lie.
 
 | | Behaviour |
 |---|---|
-| **Android**, `enableHeadless: false` (default) | events are persisted and flushed the next time the app opens. No service, no notification, no `FOREGROUND_SERVICE_LOCATION`. |
+| **Android**, `enableHeadless: false` (default) | the process is still woken and the crossing is still detected, stored and rotated on — natively. Your JS is what waits: events flush the next time the app opens. No service, no notification, no `FOREGROUND_SERVICE_LOCATION`. |
 | **Android**, `enableHeadless: true` | a short-lived foreground service runs your JS task per event. Costs a low-importance notification for a few seconds. |
 | **iOS** | the OS relaunches the app in the background. There is **no headless JS**; events are persisted natively and flushed once JS subscribes. |
 
 `enableHeadless: false` is the single biggest simplification available — take it if your app can
 tolerate delayed delivery.
+
+### What `enableHeadless: false` does *not* turn off
+
+It does not stop the OS waking your app. The geofence broadcast still starts your process
+(with no UI) and the whole native side still runs: the transition is de-duplicated by the
+gate, the state and the event are committed to disk, and **the active set is still rotated**.
+That last one matters most — rotation is what keeps the armed set correct as the user moves,
+and if it stopped while the app was closed, geofencing would break entirely a kilometre later.
+
+The only thing `false` defers is **your JavaScript**. No bridge boot, no
+`registerHeadlessTask`. And `event.timestamp` is the moment of the crossing, not the moment
+of the flush, so a late event is still an accurate one.
+
+| | `false` (default) | `true` |
+|---|---|---|
+| OS wakes the process | yes | yes |
+| Crossing detected, nothing lost | yes | yes |
+| Active set rotated | yes | yes |
+| Your JS runs *at* the crossing | no — on next launch | yes |
+| Short "Updating location" notification | no | yes, per event |
+
+### `enableHeadless` is Android-only, and that means platforms diverge
+
+There is no headless JS on iOS and no equivalent to add. iOS always behaves like Android with
+`enableHeadless: false`: the OS relaunches the app in the background, the event is committed
+natively, and JS receives it once it subscribes — which on a background relaunch may be inside
+a ~10 s budget that an RN cold start can exceed, so it is never something to rely on.
+
+So an app that reacts at the moment of arrival gets **different behaviour per platform**:
+immediate on Android with `enableHeadless: true`, deferred on iOS. That is a platform limit,
+not a bug. If you need the same behaviour on both, do the reacting server-side — the event is
+on disk natively the instant it happens, whether or not any JS ran, so uploading from
+whichever path wakes first and pushing from your backend is the only route to true parity.
 
 **On Expo, `enableHeadless: true` also needs `isAndroidForegroundServiceEnabled: true`**
 in the plugin props — see [Expo](#expo). The plugin strips the foreground-service

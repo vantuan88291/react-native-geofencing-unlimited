@@ -120,6 +120,25 @@ object Core {
     store.config = config
     Logger.d("ready: $config")
 
+    // Checked here, on the very first call, in the foreground, while the developer is
+    // watching — not left to be discovered by the first crossing that happens with the
+    // app dead, which is precisely when nobody is reading logcat.
+    //
+    // This mismatch cannot be caught at build time: `enableHeadless` is a runtime
+    // argument and the permissions are decided by the Expo plugin during `prebuild`,
+    // so the two can only be compared here.
+    if (config.enableHeadless && !hasWakeLockPermission(context)) {
+      Logger.e(
+        "MISCONFIGURED: ready({ enableHeadless: true }) but this app's manifest has no " +
+          "android.permission.WAKE_LOCK, which React Native needs to run a headless " +
+          "task. Your JS will NOT run when a geofence fires while the app is killed — " +
+          "events will queue and flush on the next launch instead. On Expo, add " +
+          "{ \"isAndroidForegroundServiceEnabled\": true } to the " +
+          "react-native-geofencing-unlimited plugin props and re-run prebuild. On bare " +
+          "React Native, check that nothing in your manifest removes it."
+      )
+    }
+
     // Every process start re-arms the whole set unconditionally, whether or not
     // `start()` is called again: a reboot, a force-stop or a Play Services reset
     // clears the OS side while our flags still say `active = true` (§4.6,
