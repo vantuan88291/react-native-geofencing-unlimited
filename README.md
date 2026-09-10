@@ -110,6 +110,12 @@ Plugin props:
 
 > **Using `enableHeadless: true`? You must also pass `isAndroidForegroundServiceEnabled: true`.**
 >
+> Not a style preference — that prop is what keeps `FOREGROUND_SERVICE`,
+> `FOREGROUND_SERVICE_LOCATION`, `POST_NOTIFICATIONS` and `WAKE_LOCK` in your manifest, and
+> React Native acquires a wake lock before your headless task runs. Strip them while
+> `enableHeadless` is still `true` and the module logs an error and leaves the events queued
+> rather than starting a service it knows will fail.
+>
 > The two are set in different places and neither knows about the other:
 > `enableHeadless` is a runtime option passed to `ready()`, while the permissions the
 > headless service needs are stripped from the merged manifest at *build* time by this
@@ -332,6 +338,7 @@ What is actually required on Android:
 | 30+ | the same two, but in **separate** requests, foreground first |
 | 31+ | coarse must be requested alongside fine; an *approximate*-only grant is **not** sufficient |
 | 33+ | `POST_NOTIFICATIONS`, only when `enableHeadless: true` |
+| any | `WAKE_LOCK`, only when `enableHeadless: true` — React Native's `HeadlessJsTaskService` acquires a wake lock before your task runs |
 
 `requestPermission()` stages all of that for you. An approximate-only grant is reported as
 `authorization: 'denied'` with `accuracyAuthorization: 'reduced'` — geofencing needs precise

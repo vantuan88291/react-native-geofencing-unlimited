@@ -80,6 +80,9 @@ const FOREGROUND_SERVICE_PERMISSIONS = [
   'android.permission.FOREGROUND_SERVICE',
   'android.permission.FOREGROUND_SERVICE_LOCATION',
   'android.permission.POST_NOTIFICATIONS',
+  // React Native's HeadlessJsTaskService acquires a wake lock unconditionally, so
+  // this one is part of the headless story and leaves with it.
+  'android.permission.WAKE_LOCK',
 ];
 
 /**

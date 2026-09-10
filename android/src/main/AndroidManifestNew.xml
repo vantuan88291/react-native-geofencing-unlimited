@@ -35,10 +35,19 @@
       `enableHeadless: false` there is no service, no notification and no use of
       these at all; the Expo plugin removes them when
       `isAndroidForegroundServiceEnabled` is false.
+
+      WAKE_LOCK is not optional and not ours to skip: React Native's
+      `HeadlessJsTaskService.startTask` calls `acquireWakeLockNow()` unconditionally,
+      so a missing grant is a `SecurityException` thrown on the app's main thread from
+      inside `super.onStartCommand` — an uncatchable hard crash, every time a geofence
+      fires while the app is killed. The default RN app template does not declare it,
+      so declaring it here is the only thing that makes `enableHeadless: true` usable.
+      `Core.startHeadless` also checks it at runtime, because a host can still strip it.
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application>
 

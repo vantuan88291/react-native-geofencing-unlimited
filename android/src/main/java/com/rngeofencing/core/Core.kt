@@ -3,6 +3,7 @@ package com.rngeofencing.core
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -410,6 +411,27 @@ object Core {
    * foreground service legal here even in Doze.
    */
   private fun startHeadless(context: Context, events: List<GeofenceEvent>) {
+    // Checked here, not left to the service. React Native's
+    // `HeadlessJsTaskService.startTask` calls `acquireWakeLockNow()` before any of our
+    // code runs again, and without the grant that throws a SecurityException on the
+    // app's **main thread** from inside `super.onStartCommand` — nothing we can catch,
+    // and a hard crash on every crossing while the app is killed. The library manifest
+    // declares WAKE_LOCK, but a host can strip it with `tools:node="remove"`, and the
+    // Expo plugin removes it whenever `isAndroidForegroundServiceEnabled` is false —
+    // which is perfectly legal alongside a stale `enableHeadless: true` in JS.
+    //
+    // So: no permission, no service. The events are already on disk and flush on the
+    // next launch, which is exactly the `enableHeadless: false` behaviour.
+    if (!hasWakeLockPermission(context)) {
+      Logger.e(
+        "enableHeadless=true but android.permission.WAKE_LOCK is not granted — the " +
+          "headless service cannot be started (React Native acquires a wake lock for " +
+          "it). ${events.size} event(s) stay queued and flush on the next launch. If " +
+          "you strip the foreground-service permissions, set enableHeadless=false too."
+      )
+      return
+    }
+
     try {
       val intent =
         Intent()
@@ -435,6 +457,13 @@ object Core {
    * A single Play Services broadcast can name several triggering geofences, and
    * starting one service per event would be both slower and easier to lose.
    */
+  private fun hasWakeLockPermission(context: Context): Boolean =
+    context.checkPermission(
+      android.Manifest.permission.WAKE_LOCK,
+      android.os.Process.myPid(),
+      android.os.Process.myUid(),
+    ) == PackageManager.PERMISSION_GRANTED
+
   private fun headlessExtras(events: List<GeofenceEvent>): Bundle {
     val array = JSONArray()
     val keys = JSONArray()

@@ -1,6 +1,6 @@
 {
   "name": "react-native-geofencing-unlimited",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Standalone geofencing native module for React Native: unlimited circular geofences with active-set rotation, background and killed-app delivery.",
   "source": "./src/index.tsx",
   "main": "./lib/commonjs/index.js",
