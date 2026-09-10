@@ -40,11 +40,16 @@ sealed class RegistryResult {
 interface RegionRegistry {
   fun isAvailable(): Boolean
 
-  fun addRegions(
-    records: List<GeofenceRecord>,
-    initialTriggerEntry: Boolean,
-    responsiveness: Int,
-  ): RegistryResult
+  /**
+   * Arms [records].
+   *
+   * There is deliberately no `initialTriggerEntry` parameter: the batch always asks
+   * Play Services for `INITIAL_TRIGGER_ENTER`, and [TransitionGate] is the single
+   * place that decides whether the resulting ENTER is a crossing or a re-arm
+   * artifact (§5.1). Suppressing it here instead would suppress it for regions
+   * rotated back in too, which is a genuine crossing the user never hears about.
+   */
+  fun addRegions(records: List<GeofenceRecord>, responsiveness: Int): RegistryResult
 
   fun removeRegions(ids: List<String>): RegistryResult
 
@@ -117,11 +122,7 @@ class PlatformRegistry(context: Context) : RegionRegistry {
    * Arms [records]. An id that already exists is **replaced**, so the §4.4 diff needs
    * no special casing for updates.
    */
-  override fun addRegions(
-    records: List<GeofenceRecord>,
-    initialTriggerEntry: Boolean,
-    responsiveness: Int,
-  ): RegistryResult {
+  override fun addRegions(records: List<GeofenceRecord>, responsiveness: Int): RegistryResult {
     if (records.isEmpty()) return RegistryResult.Success
 
     val geofences = records.mapNotNull { it.toPlatformGeofence(responsiveness) }
@@ -132,11 +133,14 @@ class PlatformRegistry(context: Context) : RegionRegistry {
       )
     }
 
+    // Always ENTER, never 0. Android has no `didDetermineState` equivalent, so this
+    // callback is the *only* way a region the user is already standing inside is ever
+    // reported — including one being re-armed by a rotation. `Config.initialTriggerEntry`
+    // is honoured in TransitionGate.onEnter, which can tell a first arming apart from
+    // a re-arm and this builder cannot (§5.1).
     val request =
       GeofencingRequest.Builder()
-        .setInitialTrigger(
-          if (initialTriggerEntry) GeofencingRequest.INITIAL_TRIGGER_ENTER else 0
-        )
+        .setInitialTrigger(GeofencingRequest.INITIAL_TRIGGER_ENTER)
         .addGeofences(geofences)
         .build()
 

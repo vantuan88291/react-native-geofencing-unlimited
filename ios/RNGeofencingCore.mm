@@ -23,6 +23,19 @@ static const NSTimeInterval RNGeofenceMaxSchedulableDwellMs = 25000.0;
 static const NSTimeInterval RNGeofenceMaxFixAgeSeconds = 600.0;
 
 /**
+ * How long a parked `requestPermission()` may wait for CoreLocation to say something.
+ *
+ * `-locationManagerDidChangeAuthorization:` is the only thing that settles a waiter,
+ * and it fires on a *change*. Ask for the Always upgrade from `authorizedWhenInUse`
+ * and the user declines — or iOS never shows the prompt at all, which is what it does
+ * once the one-shot Always prompt has been spent — and the status does not change, so
+ * nothing fires and the JS promise never resolves. Every later call then parks another
+ * waiter behind the first. After this long the waiters are settled with the status as
+ * it actually stands, which is the honest answer to "what am I allowed to do now".
+ */
+static const NSTimeInterval RNGeofencePermissionTimeoutSeconds = 30.0;
+
+/**
  * Whether a location may be used as a rotation centre (invariant 4).
  *
  * Rejecting a **stale** fix matters as much as rejecting a missing one, and it is the
@@ -414,6 +427,23 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
 
     [self->_permissionWaiters addObject:completion];
 
+    // The backstop for a prompt that is declined or never shown. Settling is
+    // idempotent — if the delegate got there first this finds nothing to do.
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW,
+                      (int64_t)(RNGeofencePermissionTimeoutSeconds * NSEC_PER_SEC)),
+        self.queue, ^{
+          if (self->_permissionWaiters.count == 0) {
+            return;
+          }
+          [RNGeofencingLogger debug:@"permission: no authorization change after %.0fs, "
+                                    @"settling with '%@'",
+                                    RNGeofencePermissionTimeoutSeconds,
+                                    [self authorizationString]];
+          self->_awaitingAlwaysUpgrade = NO;
+          [self settlePermissionWaiters];
+        });
+
     dispatch_async(dispatch_get_main_queue(), ^{
       if (status == kCLAuthorizationStatusNotDetermined) {
         // WhenInUse first. Apple rejects apps that ask for Always up front, so the
@@ -744,34 +774,38 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
     return;
   }
 
-  // A fix we asked for explicitly belongs to a rotation that had nothing cached, so it
-  // is used regardless of which trigger started it.
+  // One block, one decision. `_awaitingFreshFix` is Core-queue state, so the "was this
+  // a fix we asked for?" question can only be answered in here — and answering it in a
+  // block whose `return` cannot skip the SLC path below it is what used to rotate
+  // twice for a single one-shot fix: once for the pending trigger, then again for
+  // `SignificantLocationChange`, tearing the boundary down and re-arming it for
+  // nothing and emitting a second `onGeofencesChange`.
   dispatch_async(self.queue, ^{
-    if (!self->_awaitingFreshFix) {
+    if (self->_awaitingFreshFix) {
+      // A fix we asked for explicitly belongs to a rotation that had nothing cached,
+      // so it is used regardless of which trigger started it.
+      self->_awaitingFreshFix = NO;
+      RNGeofenceRotationTrigger trigger = self->_pendingRotationTrigger;
+      [RNGeofencingLogger debug:@"centre: one-shot fix arrived, resuming rotate(%ld)",
+                                (long)trigger];
+      [self resolvePendingDwells];
+      if (self.store.meta.enabled) {
+        [self rotateWithTrigger:trigger hint:latest];
+      }
       return;
     }
-    self->_awaitingFreshFix = NO;
-    RNGeofenceRotationTrigger trigger = self->_pendingRotationTrigger;
-    [RNGeofencingLogger debug:@"centre: one-shot fix arrived, resuming rotate(%ld)",
-                              (long)trigger];
-    [self resolvePendingDwells];
-    if (self.store.meta.enabled) {
-      [self rotateWithTrigger:trigger hint:latest];
+
+    // The first update after `startMonitoringSignificantLocationChanges` is a cached
+    // fix that CoreLocation had lying around — routinely hours old and kilometres
+    // away. Rotating on it is what produced a burst of synthetic EXITs followed by
+    // re-ENTERs on every launch, for a user who had not moved at all.
+    if (!RNGeofenceIsFixUsable(latest)) {
+      [RNGeofencingLogger debug:@"SLC update ignored: fix is %.0fs old, accuracy %.0fm",
+                                -[latest.timestamp timeIntervalSinceNow],
+                                latest.horizontalAccuracy];
+      return;
     }
-  });
 
-  // The first update after `startMonitoringSignificantLocationChanges` is a cached fix
-  // that CoreLocation had lying around — routinely hours old and kilometres away.
-  // Rotating on it is what produced a burst of synthetic EXITs followed by re-ENTERs
-  // on every launch, for a user who had not moved at all.
-  if (!RNGeofenceIsFixUsable(latest)) {
-    [RNGeofencingLogger debug:@"SLC update ignored: fix is %.0fs old, accuracy %.0fm",
-                              -[latest.timestamp timeIntervalSinceNow],
-                              latest.horizontalAccuracy];
-    return;
-  }
-
-  dispatch_async(self.queue, ^{
     [self resolvePendingDwells];
     if (self.store.meta.enabled) {
       [self rotateWithTrigger:RNGeofenceRotationTriggerSignificantLocationChange hint:latest];
@@ -841,12 +875,18 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
   NSTimeInterval delay = (double)record.loiteringDelay / 1000.0;
 
   dispatch_async(dispatch_get_main_queue(), ^{
-    [self cancelDwellTimerFor:identifier];
+    [self cancelDwellTimerOnMainFor:identifier];
 
     UIBackgroundTaskIdentifier task = [[UIApplication sharedApplication]
         beginBackgroundTaskWithName:@"RNGeofencingDwell"
                   expirationHandler:^{ [self endDwellBackgroundTaskFor:identifier]; }];
-    self->_dwellBackgroundTasks[identifier] = @(task);
+    // `UIBackgroundTaskInvalid` is what comes back when the system will not grant
+    // background time. Storing it and ending it later raises
+    // NSInternalInconsistencyException, so it is simply not stored — the timer still
+    // runs, it just has no extra runtime behind it.
+    if (task != UIBackgroundTaskInvalid) {
+      self->_dwellBackgroundTasks[identifier] = @(task);
+    }
 
     NSTimer *timer = [NSTimer
         scheduledTimerWithTimeInterval:delay
@@ -907,29 +947,67 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
   }
 }
 
+/**
+ * `_dwellTimers` and `_dwellBackgroundTasks` are **main-queue state**.
+ *
+ * Three reasons, and only the first is obvious: they are plain `NSMutableDictionary`s
+ * with no lock, so mutating them from the Core queue while `scheduleDwellFor:` writes
+ * them from the main queue is a data race that corrupts the dictionary or crashes in
+ * `cancelAllDwellTimers`; `-[NSTimer invalidate]` only reliably invalidates a timer on
+ * the thread whose run loop scheduled it, so cancelling from the Core queue left the
+ * dwell free to fire after the EXIT that cancelled it; and `UIApplication`'s
+ * background-task API is main-thread only.
+ *
+ * So every entry point below hops to the main queue and the real work lives in the
+ * `…OnMainFor:` pair. The hop is `dispatch_async`, never `dispatch_sync`: the main
+ * thread is exactly what waits on the Core queue elsewhere, and a `dispatch_sync` in
+ * this direction is a deadlock. Ordering survives it — two operations for the same
+ * identifier are enqueued from the serial Core queue in order, and the main queue
+ * runs them in that order.
+ */
 - (void)cancelDwellTimerFor:(NSString *)identifier {
+  dispatch_async(dispatch_get_main_queue(), ^{ [self cancelDwellTimerOnMainFor:identifier]; });
+}
+
+- (void)cancelAllDwellTimers {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    for (NSString *identifier in [self->_dwellTimers.allKeys copy]) {
+      [self cancelDwellTimerOnMainFor:identifier];
+    }
+    // A region whose timer already fired can still hold a background task, and
+    // iterating only the timers used to leak it until expiry.
+    for (NSString *identifier in [self->_dwellBackgroundTasks.allKeys copy]) {
+      [self endDwellBackgroundTaskOnMainFor:identifier];
+    }
+  });
+}
+
+- (void)endDwellBackgroundTaskFor:(NSString *)identifier {
+  dispatch_async(dispatch_get_main_queue(), ^{ [self endDwellBackgroundTaskOnMainFor:identifier]; });
+}
+
+/// Main queue only.
+- (void)cancelDwellTimerOnMainFor:(NSString *)identifier {
   NSTimer *timer = _dwellTimers[identifier];
   if (timer != nil) {
     [timer invalidate];
     [_dwellTimers removeObjectForKey:identifier];
   }
-  [self endDwellBackgroundTaskFor:identifier];
+  [self endDwellBackgroundTaskOnMainFor:identifier];
 }
 
-- (void)cancelAllDwellTimers {
-  for (NSString *identifier in [_dwellTimers.allKeys copy]) {
-    [self cancelDwellTimerFor:identifier];
-  }
-}
-
-- (void)endDwellBackgroundTaskFor:(NSString *)identifier {
-  NSNumber *task = _dwellBackgroundTasks[identifier];
-  if (task == nil) {
+/// Main queue only.
+- (void)endDwellBackgroundTaskOnMainFor:(NSString *)identifier {
+  NSNumber *boxed = _dwellBackgroundTasks[identifier];
+  if (boxed == nil) {
     return;
   }
   [_dwellBackgroundTasks removeObjectForKey:identifier];
-  [[UIApplication sharedApplication]
-      endBackgroundTask:(UIBackgroundTaskIdentifier)task.unsignedLongValue];
+  UIBackgroundTaskIdentifier task = (UIBackgroundTaskIdentifier)boxed.unsignedLongValue;
+  if (task == UIBackgroundTaskInvalid) {
+    return;
+  }
+  [[UIApplication sharedApplication] endBackgroundTask:task];
 }
 
 #pragma mark - Delivery

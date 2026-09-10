@@ -182,7 +182,7 @@ class RotationEngine(
     val added = mutableListOf<GeofenceRecord>()
 
     if (toAdd.isNotEmpty()) {
-      when (val result = registry.addRegions(toAdd, config.initialTriggerEntry, config.notificationResponsiveness)) {
+      when (val result = registry.addRegions(toAdd, config.notificationResponsiveness)) {
         is RegistryResult.Success -> {
           // `active` is written only now, in the commit that follows a *resolved*
           // Play Services call. A flag set optimistically for a call that then

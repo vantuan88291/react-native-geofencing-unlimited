@@ -18,6 +18,9 @@ export function offset(
   return { latitude, longitude };
 }
 
+/** Regions placed deep inside the seed radius, so a few ENTERs always fire. */
+const NEAR_COUNT = 3;
+
 /**
  * Seeds `count` geofences on a ring-and-spiral around `center`.
  *
@@ -34,7 +37,22 @@ export function seedGeofences(center: LatLng, count: number): Geofence[] {
     // centre, so the "active list must be the nearest N" check in the Registry panel
     // is actually discriminating.
     const angle = i * 0.7;
-    const distance = 150 + i * 25;
+
+    // Two tiers, and the gap between them is the point.
+    //
+    // A single even step cannot do this job. Spaced tightly enough to put several
+    // regions inside the 250 m radius, it also lands several *at* that radius — where
+    // GPS error of a few tens of metres flips them in and out, so the log fills with
+    // transitions that look like bugs and are not. Spaced widely enough to avoid that,
+    // nothing ends up inside and no ENTER ever fires.
+    //
+    // So: three regions close enough to be unambiguously inside (150-210 m of margin),
+    // then a jump clear of the radius and a wide step. Nothing lands within 40 m of
+    // the 250 m boundary, and the 20th region sits far enough out that the safe zone
+    // stays healthy — 1790 m of boundary instead of the clamped 500 m minimum, which
+    // is what used to trip the dense-cluster warning on every rotation.
+    const distance =
+      i < NEAR_COUNT ? 40 + i * 30 : 400 + (i - NEAR_COUNT) * 115;
     const at = offset(
       center,
       Math.cos(angle) * distance,

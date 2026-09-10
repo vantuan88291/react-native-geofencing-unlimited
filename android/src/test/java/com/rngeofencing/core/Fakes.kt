@@ -92,6 +92,10 @@ class FakeGeofenceStore(
     }
   }
 
+  override fun removeQueued(keys: Set<String>) {
+    queue.removeAll { it.queueKey in keys }
+  }
+
   override fun drainQueue(): List<GeofenceEvent> {
     val drained = queue.toList()
     queue.clear()
@@ -134,11 +138,7 @@ class FakeRegionRegistry(
 
   override fun isAvailable(): Boolean = available
 
-  override fun addRegions(
-    records: List<GeofenceRecord>,
-    initialTriggerEntry: Boolean,
-    responsiveness: Int,
-  ): RegistryResult {
+  override fun addRegions(records: List<GeofenceRecord>, responsiveness: Int): RegistryResult {
     calls.add("add:${records.joinToString(",") { it.id }}")
     if (addResult is RegistryResult.Failure) return addResult
 

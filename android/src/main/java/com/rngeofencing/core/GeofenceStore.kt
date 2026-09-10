@@ -51,6 +51,9 @@ interface GeofenceStore {
 
   fun enqueue(events: List<GeofenceEvent>)
 
+  /** Drops exactly the queued events named by [GeofenceEvent.queueKey], leaving the rest. */
+  fun removeQueued(keys: Set<String>)
+
   fun drainQueue(): List<GeofenceEvent>
 
   fun queueSize(): Int

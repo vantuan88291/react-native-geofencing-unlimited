@@ -278,8 +278,17 @@ class PrefsGeofenceStore(context: Context) : GeofenceStore {
     }
     if (dropped > 0) {
       Logger.w("event queue full, dropped $dropped oldest event(s)")
-      metaValue = metaValue.copy(droppedCount = metaValue.droppedCount + dropped)
+      // Through the property, not the backing field: the setter is what calls
+      // writeMeta(). Overflow happens overwhelmingly on the receiver / killed-app
+      // path, so a counter that only lives in memory is a counter nobody ever reads.
+      meta = meta.copy(droppedCount = meta.droppedCount + dropped)
     }
+    writeEvents()
+  }
+
+  override fun removeQueued(keys: Set<String>) {
+    if (keys.isEmpty() || queue.isEmpty()) return
+    if (!queue.removeAll { it.queueKey in keys }) return
     writeEvents()
   }
 

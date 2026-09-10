@@ -437,8 +437,47 @@ object Core {
    */
   private fun headlessExtras(events: List<GeofenceEvent>): Bundle {
     val array = JSONArray()
-    events.forEach { array.put(it.toWirePayload()) }
-    return Bundle().apply { putString("events", array.toString()) }
+    val keys = JSONArray()
+    events.forEach {
+      array.put(it.toWirePayload())
+      keys.put(it.queueKey)
+    }
+    return Bundle().apply {
+      putString(HEADLESS_EXTRA_EVENTS, array.toString())
+      putString(HEADLESS_EXTRA_QUEUE_KEYS, keys.toString())
+    }
+  }
+
+  /**
+   * Called by [GeofenceHeadlessService] once React Native has accepted the task, and
+   * therefore once JS is guaranteed to be handed these events through the task
+   * payload.
+   *
+   * Until this point the events are deliberately still in the queue: a service that
+   * is never started — a background-start restriction, a missing declaration, a
+   * throw — must not lose the crossing. From this point they must leave it, or the
+   * next launch's `drainQueueToJs()` delivers every one of them a second time to a
+   * host that both registered the headless task and subscribed (§6.5).
+   */
+  fun headlessTaskAccepted(context: Context, keysJson: String?) {
+    val keys = parseQueueKeys(keysJson)
+    if (keys.isEmpty()) return
+    executor.execute {
+      initialize(context, durableWrites = true)
+      requireStore().removeQueued(keys)
+      Logger.d("headless task accepted, ${keys.size} event(s) removed from the queue")
+    }
+  }
+
+  private fun parseQueueKeys(keysJson: String?): Set<String> {
+    if (keysJson.isNullOrEmpty()) return emptySet()
+    return try {
+      val array = JSONArray(keysJson)
+      (0 until array.length()).mapNotNullTo(LinkedHashSet()) { array.optString(it).ifEmpty { null } }
+    } catch (error: Throwable) {
+      Logger.w("headless extras carried an unreadable queueKeys payload", error)
+      emptySet()
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -520,6 +559,8 @@ object Core {
     engine ?: throw GeofencingException("E_NOT_READY", "the geofencing core is not initialized")
 
   const val HEADLESS_TASK_NAME = "RNGeofenceHeadlessTask"
+  const val HEADLESS_EXTRA_EVENTS = "events"
+  const val HEADLESS_EXTRA_QUEUE_KEYS = "queueKeys"
   private const val HEADLESS_SERVICE_CLASS_NAME = "com.rngeofencing.GeofenceHeadlessService"
 }
 

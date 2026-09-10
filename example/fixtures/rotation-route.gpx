@@ -2,6 +2,9 @@
 <!--
   Drives 12 km due north from the seed centre in 150 m steps.
 
+  With the default seeding this crosses roughly a hundred seeded regions and trips the
+  1790 m boundary six or seven times, so several full rotations happen along the way.
+
   What to watch (the §13 phase-5 done condition):
     - `getActiveGeofences()` changes as you move — the armed set must always be the
       nearest N, which the example's Registry panel shows sorted by distance.

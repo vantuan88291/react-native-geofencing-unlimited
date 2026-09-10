@@ -127,7 +127,18 @@ data class GeofenceEvent(
   /** Emitted by the gate, not the OS (§5.2). */
   val synthetic: Boolean = false,
   val extras: String? = null,
-)
+) {
+  /**
+   * Identity for queue bookkeeping only — never part of the JS payload.
+   *
+   * The headless path hands events to JS through the service intent *and* leaves
+   * them queued, so that a service which never starts still loses nothing. Once the
+   * task is accepted these keys are what removes exactly those events again, instead
+   * of them being re-delivered by the next launch's queue flush (§6.5).
+   */
+  val queueKey: String
+    get() = "$id|${action.name}|$timestamp"
+}
 
 /** Rotation bookkeeping (§9.2). */
 data class RotationMeta(

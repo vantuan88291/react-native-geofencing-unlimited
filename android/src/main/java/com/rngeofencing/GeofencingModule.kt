@@ -61,7 +61,7 @@ class GeofencingModule internal constructor(private val reactContext: ReactAppli
     val title: String = "Background location needed",
     val message: String =
       "This app only detects arrivals and departures while it is closed if location " +
-        "is set to \"Allow all the time\". Android only offers that in Settings.",
+        "is set to \"Allow all the time\".",
     val positive: String = "Open settings",
     val negative: String = "Not now",
   )

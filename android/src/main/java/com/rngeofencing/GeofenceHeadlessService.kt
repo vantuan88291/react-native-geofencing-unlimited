@@ -36,6 +36,17 @@ class GeofenceHeadlessService : HeadlessJsTaskService() {
 
   override fun getTaskConfig(intent: Intent?): HeadlessJsTaskConfig? {
     val extras = intent?.extras ?: return null
+
+    // Returning a non-null config is the point of no return: React Native starts the
+    // task from here, so JS *will* see these events. They were queued before the
+    // service was started so that a service which never starts loses nothing; now
+    // that it has, they have to leave the queue or the next launch flushes them into
+    // JS a second time (§6.5).
+    Core.headlessTaskAccepted(
+      applicationContext,
+      extras.getString(Core.HEADLESS_EXTRA_QUEUE_KEYS),
+    )
+
     return HeadlessJsTaskConfig(
       Core.HEADLESS_TASK_NAME,
       Arguments.fromBundle(extras),

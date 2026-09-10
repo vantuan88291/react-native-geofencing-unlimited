@@ -420,7 +420,7 @@ debugging a missed crossing, that distinction matters.
 | Option | Default | |
 |---|---|---|
 | `proximityRadius` | `2000` | metres; geofences further than this are not armed |
-| `initialTriggerEntry` | `true` | fire ENTER when a geofence is first armed and you are already inside |
+| `initialTriggerEntry` | `true` | fire ENTER when a geofence is armed for the **very first time** and you are already inside. It never suppresses the ENTER for a geofence rotated back in — that one is a real crossing you were not told about while it was off. |
 | `minRadius` | `200` | smaller radii are clamped up, with a warning |
 | `notificationResponsiveness` | `0` | Android only; Play Services' delivery-latency budget in ms. **Nothing to do with notifications.** |
 | `useSignificantLocationChanges` | `true` | iOS only; backstop rotation trigger |
