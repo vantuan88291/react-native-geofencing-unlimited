@@ -1,5 +1,10 @@
 # react-native-geofencing-unlimited
 
+[![npm version](https://img.shields.io/npm/v/react-native-geofencing-unlimited.svg?style=flat-square)](https://www.npmjs.com/package/react-native-geofencing-unlimited)
+[![npm downloads](https://img.shields.io/npm/dm/react-native-geofencing-unlimited.svg?style=flat-square)](https://www.npmjs.com/package/react-native-geofencing-unlimited)
+[![license](https://img.shields.io/npm/l/react-native-geofencing-unlimited.svg?style=flat-square)](./LICENSE)
+[![platforms](https://img.shields.io/badge/platforms-ios%20%7C%20android-lightgrey.svg?style=flat-square)](#install)
+
 Unlimited circular geofences for React Native, with background and killed-app delivery.
 
 Wakes your app when the user enters or leaves one of your circles — even if the app has been
@@ -102,6 +107,18 @@ Plugin props:
 | `locationAlwaysAndWhenInUsePermission` | a generic string | `NSLocationAlwaysAndWhenInUseUsageDescription`; `false` skips the key |
 | `isAndroidBackgroundLocationEnabled` | `true` | `false` strips `ACCESS_BACKGROUND_LOCATION` from the merged manifest |
 | `isAndroidForegroundServiceEnabled` | `false` | `true` keeps the foreground-service permissions; only needed with `enableHeadless: true` |
+
+> **Using `enableHeadless: true`? You must also pass `isAndroidForegroundServiceEnabled: true`.**
+>
+> The two are set in different places and neither knows about the other:
+> `enableHeadless` is a runtime option passed to `ready()`, while the permissions the
+> headless service needs are stripped from the merged manifest at *build* time by this
+> plugin, which defaults to removing them. Set one without the other and the service
+> cannot start — silently, with only a logcat warning.
+>
+> ```json
+> ["react-native-geofencing-unlimited", { "isAndroidForegroundServiceEnabled": true }]
+> ```
 
 **`compileSdk >= 34`:** set it with
 [`expo-build-properties`](https://docs.expo.dev/versions/latest/sdk/build-properties/), not by
@@ -282,6 +299,10 @@ location, and reporting it as success would be a lie.
 
 `enableHeadless: false` is the single biggest simplification available — take it if your app can
 tolerate delayed delivery.
+
+**On Expo, `enableHeadless: true` also needs `isAndroidForegroundServiceEnabled: true`**
+in the plugin props — see [Expo](#expo). The plugin strips the foreground-service
+permissions by default, and without them the service cannot start.
 
 For `enableHeadless: true`, register the task at **module scope in `index.js`**, outside the React
 tree — the headless bundle runs before any component mounts:
