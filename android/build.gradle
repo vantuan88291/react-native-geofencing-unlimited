@@ -97,6 +97,9 @@ android {
   defaultConfig {
     minSdkVersion getExtOrIntegerDefault("minSdkVersion")
 
+    // Applied to the consuming app's R8 run; see the file for why it is not optional.
+    consumerProguardFiles "consumer-rules.pro"
+
     // Read by GeofencingPackage to decide `isTurboModule` (§15.3).
     buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
   }

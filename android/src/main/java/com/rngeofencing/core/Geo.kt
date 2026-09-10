@@ -44,12 +44,24 @@ fun clamp(value: Double, low: Double, high: Double): Double =
   }
 
 /**
- * The oldest a fix may be before it is unfit to rotate around.
+ * The oldest a cached fix may be before it is worth spending a one-shot request to
+ * replace it.
  *
- * Two minutes: the rotation only has to pick the nearest N geofences, so a slightly
- * old fix is fine, while a genuinely stale one is not.
+ * Ten minutes, not two. This only decides whether to *ask* for something better — and
+ * asking is expensive: the request blocks the single-threaded executor that also
+ * handles geofence transitions, and a broadcast receiver has roughly ten seconds
+ * before the process is frozen. Stalling there can cost a real crossing.
+ *
+ * Ten minutes is comfortably safe for what the centre is used for: picking the nearest
+ * N geofences within a 2 km proximity radius. Someone walking covers under a kilometre
+ * in that time, well inside the boundary that would have triggered a fresh rotation
+ * anyway — and any rotation caused by an actual crossing arrives with the OS's own
+ * location attached.
+ *
+ * It is deliberately *not* the defence against a centre in the wrong place; that is
+ * handled by preferring the freshest of the available fixes.
  */
-const val MAX_FIX_AGE_MS = 2 * 60 * 1000L
+const val MAX_FIX_AGE_MS = 10 * 60 * 1000L
 
 /**
  * Whether a location may be used as a rotation centre (invariant 4).

@@ -45,9 +45,15 @@ class LocationResolver(context: Context) {
       return null
     }
 
-    lastKnown()?.let {
+    val cached = cachedFix()
+    val cachedPoint = cached?.toLatLng()?.takeIf { it.isValid }
+    val cachedAgeMs = cached?.let { System.currentTimeMillis() - it.time }
+
+    if (cached != null && cachedPoint != null && cachedAgeMs != null &&
+      isFixUsable(cachedPoint, cachedAgeMs, cached.accuracy.toDouble())
+    ) {
       Logger.d("center: using last known location")
-      return it
+      return cachedPoint
     }
 
     oneShot()?.let {
@@ -55,33 +61,30 @@ class LocationResolver(context: Context) {
       return it
     }
 
+    // **A stale fix still beats not rotating at all.**
+    //
+    // Freshness is a preference, not a veto. A device that has not moved has a fix
+    // that is old and exactly right, and there is no reason to ask for a new one —
+    // which on a stationary device may never arrive, because nothing is producing
+    // location updates. Refusing to rotate then strands the whole active set, which is
+    // a far worse failure than the slightly-stale centre invariant 4 warns about; that
+    // warning is about a centre in the *wrong place*, and age alone does not make one.
+    if (cachedPoint != null) {
+      Logger.w(
+        "center: no fresh fix available, falling back to one ${(cachedAgeMs ?: 0) / 1000}s old " +
+          "— stale beats not rotating"
+      )
+      return cachedPoint
+    }
+
     Logger.w("center: unresolved — keeping the current active set and retrying on the next trigger")
     return null
   }
 
-  private fun lastKnown(): LatLng? =
+  /** The provider's cached fix, unfiltered — [resolve] decides what to do with it. */
+  private fun cachedFix(): Location? =
     try {
-      val location =
-        Tasks.await(client.lastLocation, LAST_LOCATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-      when {
-        location == null -> null
-        // A cached fix can be arbitrarily old. Rotating around one is as damaging as
-        // rotating around no centre at all (invariant 4), so it is rejected here and
-        // the caller falls through to a one-shot fix.
-        !isFixUsable(
-          location.toLatLng(),
-          ageMs = System.currentTimeMillis() - location.time,
-          accuracyMetres = location.accuracy.toDouble(),
-        ) -> {
-          Logger.d(
-            "center: ignoring last known fix — " +
-              "${(System.currentTimeMillis() - location.time) / 1000}s old, " +
-              "accuracy ${location.accuracy}m"
-          )
-          null
-        }
-        else -> location.toLatLng()
-      }
+      Tasks.await(client.lastLocation, LAST_LOCATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
     } catch (error: Throwable) {
       Logger.d("center: getLastLocation failed — ${error.message}")
       null
@@ -133,7 +136,15 @@ class LocationResolver(context: Context) {
 
   private companion object {
     const val LAST_LOCATION_TIMEOUT_SECONDS = 5L
-    const val ONE_SHOT_TIMEOUT_SECONDS = 10L
+
+    /**
+     * Deliberately short. This blocks the single-threaded executor that also handles
+     * geofence transitions, and a broadcast receiver has only about ten seconds before
+     * the process is frozen — so a long wait here can cost a real crossing. If no fix
+     * arrives in this window, the cached one is used instead, which is almost always
+     * good enough for choosing the nearest N geofences.
+     */
+    const val ONE_SHOT_TIMEOUT_SECONDS = 4L
   }
 }
 

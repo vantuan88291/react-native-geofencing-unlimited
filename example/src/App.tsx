@@ -294,11 +294,14 @@ export default function App() {
                 run('requestPermission', async () => {
                   // Resolves with the resulting state even on denial — branch on the
                   // state, never on a catch (§8.4).
+                  // The library raises the Android settings dialog itself now, for
+                  // parity with the second system dialog iOS shows. Nothing to build
+                  // here beyond reporting what came back.
                   const next = await Geofencing.requestPermission();
                   if (next.authorization !== 'always') {
                     Alert.alert(
-                      'Not enough',
-                      `Got "${next.authorization}". Background delivery needs "always" — use Open settings.`
+                      'Still not "always"',
+                      `Got "${next.authorization}". Background delivery needs "always".`
                     );
                   }
                 })
@@ -592,7 +595,7 @@ function Button({
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1 },
+  safeArea: { flex: 1, paddingTop: 50 },
   screen: { flex: 1, backgroundColor: '#f4f4f5' },
   content: { padding: 16, paddingBottom: 48, gap: 12 },
   title: { fontSize: 20, fontWeight: '700', color: '#18181b' },

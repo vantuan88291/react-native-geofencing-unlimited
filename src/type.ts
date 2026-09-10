@@ -90,6 +90,27 @@ export type GeofencesChange = {
   off: string[];
 };
 
+/**
+ * Copy for the Android background-location dialog.
+ *
+ * iOS asks for "always" with a second *system* dialog. Android has no equivalent —
+ * API 30+ deliberately removed "Allow all the time" from the system dialog, and the
+ * only route to it is the Settings page — so the module shows this dialog itself and
+ * opens Settings when the user accepts.
+ *
+ * Every field is optional; anything omitted falls back to the English default. Supply
+ * your own strings to localise, and remember Play Store policy expects the *reason*
+ * to be stated before the user is sent to Settings.
+ */
+export type AndroidBackgroundPermissionRationale = {
+  title?: string;
+  message?: string;
+  /** Opens the app's settings page. */
+  positiveButton?: string;
+  /** Dismisses; `requestPermission()` still resolves with the resulting state. */
+  negativeButton?: string;
+};
+
 /** Passed to `ready()`; persisted, so it survives into the killed-app paths (§9.2). */
 export type GeofencingConfig = {
   /**
@@ -116,6 +137,16 @@ export type GeofencingConfig = {
    * (§6.5). Default `false` — events queue and flush on next launch instead.
    */
   enableHeadless?: boolean;
+  /**
+   * Android only. Shown by `requestPermission()` when the user granted foreground
+   * location but not background, which is the point where iOS would raise its own
+   * second system dialog and Android raises nothing at all.
+   *
+   * On by default, for parity with iOS. Pass `false` to suppress it and drive the
+   * flow yourself with `getState()` + `openSettings()`.
+   */
+  androidBackgroundPermissionRationale?:
+    AndroidBackgroundPermissionRationale | false;
   /** Metres. User radii below this are clamped up (§10). Default 200. */
   minRadius?: number;
   /** Log every rotation's centre, boundary radius and on/off diff (§14). Default `false`. */

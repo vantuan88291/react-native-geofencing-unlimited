@@ -73,6 +73,11 @@ export type ConfigSpec = {
   useSignificantLocationChanges?: boolean;
   /** Android only; default false. */
   enableHeadless?: boolean;
+  /**
+   * Android only. An object of strings, or `false` to suppress the dialog. Read as a
+   * plain map natively; see `AndroidBackgroundPermissionRationale` in `type.ts`.
+   */
+  androidBackgroundPermissionRationale?: Object;
   /** Metres; default 200. */
   minRadius?: number;
   /** Default false. */

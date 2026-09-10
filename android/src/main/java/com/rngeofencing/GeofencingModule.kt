@@ -1,6 +1,8 @@
 package com.rngeofencing
 
 import android.Manifest
+import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -12,6 +14,7 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.ReadableType
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
@@ -41,6 +44,27 @@ class GeofencingModule internal constructor(private val reactContext: ReactAppli
 
   /** One permission request at a time (§6.7). */
   private var pendingPermission: Promise? = null
+
+  /**
+   * Copy for the background-location dialog, or `null` when the host suppressed it.
+   *
+   * Captured from `ready()` on the calling thread rather than read back from the
+   * store, because the dialog is raised from the permission callback on the main
+   * thread and must not wait on the core's executor.
+   */
+  private var backgroundRationale: Rationale? = Rationale()
+
+  /** Guards against the dialog reappearing when the system request it starts returns. */
+  private var rationaleShown = false
+
+  private data class Rationale(
+    val title: String = "Background location needed",
+    val message: String =
+      "This app only detects arrivals and departures while it is closed if location " +
+        "is set to \"Allow all the time\". Android only offers that in Settings.",
+    val positive: String = "Open settings",
+    val negative: String = "Not now",
+  )
 
   init {
     Core.attachDelivery(delivery)
@@ -78,8 +102,37 @@ class GeofencingModule internal constructor(private val reactContext: ReactAppli
 
   @ReactMethod
   override fun ready(config: ReadableMap, promise: Promise) {
+    // Read on the calling thread: a ReadableMap is not guaranteed to outlive this call.
+    backgroundRationale = config.readRationale()
     resolveOnExecutor(promise) { Core.ready(appContext(), config.toConfig()).toWritableMap() }
   }
+
+  private fun ReadableMap.readRationale(): Rationale? {
+    val key = "androidBackgroundPermissionRationale"
+    if (!hasKey(key) || isNull(key)) return Rationale()
+    return when (getType(key)) {
+      // `false` suppresses the dialog entirely; the host drives the flow itself.
+      ReadableType.Boolean -> if (getBoolean(key)) Rationale() else null
+      ReadableType.Map -> {
+        val map = getMap(key) ?: return Rationale()
+        val defaults = Rationale()
+        Rationale(
+          title = map.optString("title") ?: defaults.title,
+          message = map.optString("message") ?: defaults.message,
+          positive = map.optString("positiveButton") ?: defaults.positive,
+          negative = map.optString("negativeButton") ?: defaults.negative,
+        )
+      }
+      else -> Rationale()
+    }
+  }
+
+  private fun ReadableMap.optString(key: String): String? =
+    if (hasKey(key) && !isNull(key) && getType(key) == ReadableType.String) {
+      getString(key)?.takeIf { it.isNotBlank() }
+    } else {
+      null
+    }
 
   @ReactMethod
   override fun start(promise: Promise) {
@@ -186,16 +239,51 @@ class GeofencingModule internal constructor(private val reactContext: ReactAppli
     // is the only remaining path to background location once the system has stopped
     // showing the dialog, but the host app owns that UX decision (§6.7).
     try {
-      val intent =
-        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-          data = Uri.fromParts("package", reactContext.packageName, null)
-          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-      reactContext.startActivity(intent)
+      openAppSettings()
       promise.resolve(null)
     } catch (error: Throwable) {
       promise.reject("E_INTERNAL", "could not open app settings: ${error.message}", error)
     }
+  }
+
+  /**
+   * Sends the user to the screen where background location can actually be enabled.
+   *
+   * On API 30+ the system's own `requestPermissions` navigation lands directly on the
+   * app's **location permission** page, with "Allow all the time" right there — far
+   * better than the app-details page, which buries it three taps deep under
+   * Permissions › Location. That navigation is the only public way to reach it, so it
+   * is used for exactly that, after the user has been told why.
+   *
+   * Everywhere else, and if that call fails, the app-details page is the fallback.
+   */
+  private fun openBackgroundPermissionScreen(activity: Activity) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && activity is PermissionAwareActivity) {
+      try {
+        activity.requestPermissions(
+          arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+          RC_BACKGROUND,
+          listener,
+        )
+        // The promise settles in the RC_BACKGROUND callback, once the user returns.
+        return
+      } catch (error: Throwable) {
+        Logger.w("could not open the location permission screen, falling back", error)
+      }
+    }
+
+    runCatching { openAppSettings() }
+      .onFailure { Logger.w("could not open app settings", it) }
+    finishPermissionRequest()
+  }
+
+  private fun openAppSettings() {
+    val intent =
+      Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+        data = Uri.fromParts("package", reactContext.packageName, null)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+    reactContext.startActivity(intent)
   }
 
   @ReactMethod override fun addListener(eventName: String) {
@@ -230,6 +318,7 @@ class GeofencingModule internal constructor(private val reactContext: ReactAppli
     }
 
     pendingPermission = promise
+    rationaleShown = false
     Permissions.markRequested(reactContext)
     requestForeground(activity)
   }
@@ -263,23 +352,59 @@ class GeofencingModule internal constructor(private val reactContext: ReactAppli
     activity.requestPermissions(all, RC_FOREGROUND, listener)
   }
 
-  private fun requestBackgroundIfNeeded(activity: PermissionAwareActivity) {
+  /**
+   * @return `true` when a second request is now in flight, so the caller knows the
+   *   listener must stay registered.
+   */
+  private fun requestBackgroundIfNeeded(activity: PermissionAwareActivity): Boolean {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || Permissions.hasBackground(reactContext)) {
       finishPermissionRequest()
-      return
+      return false
     }
 
-    // API 30+: a separate request, and only ever ONE. After a denial the system
-    // ignores further calls silently, and `shouldShowRequestPermissionRationale`
-    // returning false with the permission ungranted is how that is detected — at
-    // which point `openSettings()` is the only remaining path (§6.7).
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      // **API 30+ has no dialog for this, only navigation.**
+      //
+      // `requestPermissions(ACCESS_BACKGROUND_LOCATION)` does not prompt here — it
+      // sends the user straight to the app's *location permission* page, which is
+      // exactly where they need to be, but with no word about why. So the reason is
+      // given first, in a dialog, and the system call is made only if they accept —
+      // which is also what Play Store policy asks for (§6.7).
+      if (!maybeShowBackgroundRationale(activity as Activity)) {
+        finishPermissionRequest()
+      }
+      // The dialog re-registers the listener if the user accepts; nothing is in flight
+      // until then.
+      return false
+    }
+
+    // API 29 is the one version where the system dialog really does offer "Allow all
+    // the time", so let it ask.
     activity.requestPermissions(
       arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
       RC_BACKGROUND,
       listener,
     )
+    return true
   }
 
+  /**
+   * The return value is load-bearing, and not in the obvious direction.
+   *
+   * `ReactActivityDelegate` clears its stored listener the moment one returns `true`:
+   *
+   * ```java
+   * if (mPermissionListener != null && mPermissionListener.onRequestPermissionsResult(...)) {
+   *   mPermissionListener = null;
+   * }
+   * ```
+   *
+   * The background request is chained from *inside* this callback, which re-registers
+   * this same listener — so returning `true` afterwards wipes the registration that
+   * was just made, the background result is delivered to nobody, and the promise from
+   * `requestPermission()` never settles. Returning `false` while a request is still in
+   * flight is what keeps the chain alive.
+   */
   private val listener =
     PermissionListener { requestCode, _, _ ->
       when (requestCode) {
@@ -287,19 +412,76 @@ class GeofencingModule internal constructor(private val reactContext: ReactAppli
           // Never request background before foreground is granted: on API 30+ the
           // call is wasted, and it is the one background request the system honours.
           val activity = reactContext.currentActivity
-          if (Permissions.hasFine(reactContext) && activity is PermissionAwareActivity) {
-            requestBackgroundIfNeeded(activity)
-          } else {
-            // Denied. This resolves with the resulting state — a denial is a result,
-            // not an error (§8.4).
+          val chained =
+            if (Permissions.hasFine(reactContext) && activity is PermissionAwareActivity) {
+              requestBackgroundIfNeeded(activity)
+            } else {
+              // Denied. This resolves with the resulting state — a denial is a result,
+              // not an error (§8.4).
+              finishPermissionRequest()
+              false
+            }
+          // Keep the listener registered exactly while a request is outstanding.
+          !chained
+        }
+        RC_BACKGROUND -> {
+          // The system request has come back. If background is still ungranted, this
+          // is the point where iOS would have raised its own second dialog and
+          // Android raises nothing — so the module raises one (§6.7, and see
+          // `backgroundRationale`).
+          val activity = reactContext.currentActivity
+          val shown =
+            !rationaleShown && activity != null && maybeShowBackgroundRationale(activity)
+          if (!shown) {
             finishPermissionRequest()
           }
+          true
         }
-        RC_BACKGROUND -> finishPermissionRequest()
-        else -> return@PermissionListener false
+        else -> false
       }
-      true // consumed; RN removes the listener
     }
+
+  /**
+   * Offers the Settings page when the system has nothing left to ask.
+   *
+   * From API 30 the "Allow all the time" option is deliberately absent from the system
+   * dialog, so a user who wants background location can only enable it in Settings —
+   * and nothing in the platform tells them that. Without this dialog the flow simply
+   * stops, which reads as the feature being broken.
+   *
+   * Play Store policy expects the reason to be stated *before* the user is sent to
+   * Settings, which is exactly what this dialog does. Hosts that would rather word it
+   * themselves pass `androidBackgroundPermissionRationale: false` and drive the flow
+   * with `getState()` + `openSettings()`.
+   *
+   * @return `true` when a dialog was shown, in which case it owns settling the promise.
+   */
+  private fun maybeShowBackgroundRationale(activity: Activity): Boolean {
+    val rationale = backgroundRationale ?: return false
+    if (Permissions.hasBackground(reactContext)) return false
+    if (activity.isFinishing || activity.isDestroyed) return false
+
+    rationaleShown = true
+    activity.runOnUiThread {
+      try {
+        AlertDialog.Builder(activity)
+          .setTitle(rationale.title)
+          .setMessage(rationale.message)
+          .setPositiveButton(rationale.positive) { _, _ -> openBackgroundPermissionScreen(activity) }
+          .setNegativeButton(rationale.negative) { _, _ -> finishPermissionRequest() }
+          // Back button or a tap outside must settle the promise too, or the caller
+          // waits forever.
+          .setOnCancelListener { finishPermissionRequest() }
+          .show()
+      } catch (error: Throwable) {
+        // A window-token failure during a configuration change must not strand the
+        // promise.
+        Logger.w("background rationale dialog could not be shown", error)
+        finishPermissionRequest()
+      }
+    }
+    return true
+  }
 
   private fun finishPermissionRequest() {
     val promise = pendingPermission ?: return

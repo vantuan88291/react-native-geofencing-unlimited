@@ -154,7 +154,10 @@ the Expo plugin would otherwise have written for you:
 Then `cd ios && pod install`. See `example/ios/GeofencingExample/Info.plist` for a working copy.
 
 Android needs nothing: the library's manifest declares its own permissions, receivers and service,
-and AGP merges them into your app.
+and AGP merges them into your app. Minification is handled too — the library ships
+`consumer-rules.pro`, which R8 applies automatically, so nothing has to be added to your
+own `proguard-rules.pro`. Two of its components are addressed by name at runtime, and
+renaming either would stop delivery in release builds only.
 
 **Do not** add a `didFinishLaunchingWithOptions` snippet from another library's README. This module
 does not need one — see below.
@@ -263,10 +266,55 @@ matters more there. On iOS it happens whether JS calls anything or not.
 const state = await Geofencing.requestPermission();
 
 if (state.authorization !== 'always') {
-  // Background delivery needs 'always' on iOS, and fine + background on Android.
-  await Geofencing.openSettings();
+  Alert.alert(
+    'Background location needed',
+    'Geofences only fire in the background with "Allow all the time".',
+    [
+      { text: 'Not now', style: 'cancel' },
+      { text: 'Open settings', onPress: () => Geofencing.openSettings() },
+    ]
+  );
 }
 ```
+
+**The second prompt is raised for you on both platforms.** iOS asks for `always` with
+a second *system* dialog. Android has no equivalent, and what it does instead is worse
+than nothing: from **API 30, `requestPermissions(ACCESS_BACKGROUND_LOCATION)` shows no
+dialog at all** — it drops the user straight onto the app's location settings page,
+with no explanation of why they were sent there.
+
+So on API 30+ the module shows its own dialog giving the reason first, and makes that
+system call only if the user accepts — which then lands them exactly where they need to
+be: the app's **location permission** page, with "Allow all the time" right there. That
+navigation is the only public way to reach that screen; the app-details page buries it
+three taps deep under Permissions › Location, and is used only as a fallback.
+
+On API 29 — the one version whose system dialog really does offer "Allow all the
+time" — the system is still allowed to ask directly.
+
+Customise the copy, or turn it off, from `ready()`:
+
+```ts
+await Geofencing.ready({
+  androidBackgroundPermissionRationale: {
+    title: 'Cần vị trí nền',
+    message:
+      'Ứng dụng chỉ nhận biết bạn đến và rời khỏi địa điểm khi đã đóng nếu bạn ' +
+      'chọn "Luôn cho phép". Android chỉ cho bật mục này trong Cài đặt.',
+    positiveButton: 'Mở cài đặt',
+    negativeButton: 'Để sau',
+  },
+});
+```
+
+```ts
+// Or drive the whole flow yourself with getState() + openSettings().
+await Geofencing.ready({ androidBackgroundPermissionRationale: false });
+```
+
+The default copy is English, so **supply your own strings if your app is not**. Play
+Store policy expects the *reason* to be stated before the user is sent to Settings,
+which is what this dialog is for — keep that in whatever wording you choose.
 
 Two rules that are easy to get wrong:
 
@@ -377,6 +425,7 @@ debugging a missed crossing, that distinction matters.
 | `notificationResponsiveness` | `0` | Android only; Play Services' delivery-latency budget in ms. **Nothing to do with notifications.** |
 | `useSignificantLocationChanges` | `true` | iOS only; backstop rotation trigger |
 | `enableHeadless` | `false` | Android only; see above |
+| `androidBackgroundPermissionRationale` | on, English copy | Android only; the dialog offering Settings when background is refused. `false` disables it |
 | `debug` | `false` | logs every rotation's centre, boundary radius and on/off diff |
 
 **Turn on `debug` first when something is wrong.** Almost every issue resolves to reading one

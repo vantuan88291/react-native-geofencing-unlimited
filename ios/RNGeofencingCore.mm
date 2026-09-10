@@ -10,12 +10,17 @@
 static const NSTimeInterval RNGeofenceMaxSchedulableDwellMs = 25000.0;
 
 /**
- * The oldest a fix may be before it is unfit to rotate around.
+ * The oldest a cached fix may be before a fresh one is requested instead.
  *
- * Two minutes: the rotation only has to pick the nearest 19 geofences, so a slightly
- * old fix is fine, while a genuinely stale one is not.
+ * Ten minutes, matching Android. This only decides whether to *ask* for something
+ * better, and it is comfortably safe for what the centre is used for: picking the
+ * nearest 19 geofences within a 2 km proximity radius.
+ *
+ * It is deliberately *not* the defence against a centre in the wrong place — that is
+ * handled by preferring the freshest of the available fixes, which is what catches a
+ * significant-location-change update carrying a position the device has already left.
  */
-static const NSTimeInterval RNGeofenceMaxFixAgeSeconds = 120.0;
+static const NSTimeInterval RNGeofenceMaxFixAgeSeconds = 600.0;
 
 /**
  * Whether a location may be used as a rotation centre (invariant 4).
@@ -473,6 +478,12 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
 #pragma mark - Rotation
 
 - (void)rotateWithTrigger:(RNGeofenceRotationTrigger)trigger hint:(nullable CLLocation *)hint {
+  [self rotateWithTrigger:trigger hint:hint allowStale:NO];
+}
+
+- (void)rotateWithTrigger:(RNGeofenceRotationTrigger)trigger
+                     hint:(nullable CLLocation *)hint
+               allowStale:(BOOL)allowStale {
   if (![RNGeofencingPlatformRegistry isAvailable]) {
     [RNGeofencingLogger warn:@"rotate: region monitoring unavailable, module is inert"];
     return;
@@ -505,6 +516,21 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
     resolved = hint;
   } else if (managerUsable) {
     resolved = managerFix;
+  }
+
+  // Freshness is a preference, not a veto. A device that has not moved has a fix that
+  // is old and exactly right, and refusing to rotate on it strands the whole active
+  // set — a far worse failure than the stale centre invariant 4 warns about, which is
+  // about a centre in the *wrong place*. So once a fresh one has been asked for and
+  // did not arrive, whatever is cached is used.
+  if (resolved == nil && allowStale) {
+    CLLocation *fallback = hint ?: managerFix;
+    if (fallback != nil && CLLocationCoordinate2DIsValid(fallback.coordinate)) {
+      [RNGeofencingLogger warn:@"centre: no fresh fix available, falling back to one %.0fs old "
+                               @"— stale beats not rotating",
+                               -[fallback.timestamp timeIntervalSinceNow]];
+      resolved = fallback;
+    }
   }
 
   if (resolved == nil) {
@@ -673,7 +699,17 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
 - (void)locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error {
   [RNGeofencingLogger warn:@"location request failed: %@ (CLError %ld)",
                            error.localizedDescription, (long)error.code];
-  dispatch_async(self.queue, ^{ self->_awaitingFreshFix = NO; });
+  dispatch_async(self.queue, ^{
+    if (!self->_awaitingFreshFix) {
+      return;
+    }
+    self->_awaitingFreshFix = NO;
+    // The rotation that asked for this fix still needs a centre; let it use whatever
+    // is cached rather than skipping the rotation entirely.
+    if (self.store.meta.enabled) {
+      [self rotateWithTrigger:self->_pendingRotationTrigger hint:nil allowStale:YES];
+    }
+  });
 }
 
 - (void)locationManagerDidChangeAuthorization:(CLLocationManager *)manager {
