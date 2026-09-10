@@ -106,15 +106,31 @@ class FakeGeofenceStore(
   }
 }
 
-/** Records the call order, which is what makes invariant 3 assertable. */
+/**
+ * Records the call order, which is what makes invariant 3 assertable.
+ *
+ * It also models the platform's **hard slot cap**, which is not optional detail: iOS
+ * refuses past 20 monitored regions and Play Services past 100, and the surplus is
+ * rejected rather than queued. A fake without that cap happily accepts an
+ * add-before-remove superset that no real device would hold — which is exactly how a
+ * silent "the new regions were never armed" bug slips through a green test suite.
+ */
 class FakeRegionRegistry(
   private var available: Boolean = true,
   var addResult: RegistryResult = RegistryResult.Success,
   var removeResult: RegistryResult = RegistryResult.Success,
+  /** `Int.MAX_VALUE` models a registry with no cap. Pass 20 for iOS, 100 for Android. */
+  private val platformMax: Int = Int.MAX_VALUE,
 ) : RegionRegistry {
 
   /** Every call in order, e.g. `["add:a,b", "remove:c", "removeBoundary", "addBoundary:1300"]`. */
   val calls = mutableListOf<String>()
+
+  /** What the "OS" is holding, boundary included. */
+  val monitored = linkedSetOf<String>()
+
+  /** Adds the platform refused because the cap was already reached. */
+  val rejected = mutableListOf<String>()
 
   override fun isAvailable(): Boolean = available
 
@@ -124,27 +140,57 @@ class FakeRegionRegistry(
     responsiveness: Int,
   ): RegistryResult {
     calls.add("add:${records.joinToString(",") { it.id }}")
-    return addResult
+    if (addResult is RegistryResult.Failure) return addResult
+
+    // Registered one by one, in order, until the cap bites — which is how
+    // CLLocationManager behaves. (Play Services rejects the whole batch instead; the
+    // per-region form is the stricter model to test against.)
+    records.forEach { record ->
+      if (monitored.contains(record.id) || monitored.size < platformMax) {
+        monitored.add(record.id)
+      } else {
+        rejected.add(record.id)
+      }
+    }
+    return if (rejected.isEmpty()) {
+      RegistryResult.Success
+    } else {
+      RegistryResult.Failure("E_PLATFORM", "GEOFENCE_TOO_MANY_GEOFENCES")
+    }
   }
 
   override fun removeRegions(ids: List<String>): RegistryResult {
     calls.add("remove:${ids.sorted().joinToString(",")}")
-    return removeResult
+    if (removeResult is RegistryResult.Failure) return removeResult
+    monitored.removeAll(ids.toSet())
+    return RegistryResult.Success
   }
 
   override fun addBoundary(center: LatLng, radius: Double): RegistryResult {
     calls.add("addBoundary:${radius.toInt()}")
+    if (monitored.size >= platformMax && !monitored.contains(BOUNDARY_ID)) {
+      rejected.add(BOUNDARY_ID)
+      return RegistryResult.Failure("E_PLATFORM", "GEOFENCE_TOO_MANY_GEOFENCES")
+    }
+    monitored.add(BOUNDARY_ID)
     return RegistryResult.Success
   }
 
   override fun removeBoundary(): RegistryResult {
     calls.add("removeBoundary")
+    monitored.remove(BOUNDARY_ID)
     return RegistryResult.Success
   }
 
   override fun removeAll(): RegistryResult {
     calls.add("removeAll")
+    monitored.clear()
     return RegistryResult.Success
+  }
+
+  /** Seeds the "OS" state, for a test that starts from an already-armed set. */
+  fun seedMonitored(vararg ids: String) {
+    monitored.addAll(ids)
   }
 }
 

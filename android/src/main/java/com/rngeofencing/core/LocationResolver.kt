@@ -61,8 +61,27 @@ class LocationResolver(context: Context) {
 
   private fun lastKnown(): LatLng? =
     try {
-      Tasks.await(client.lastLocation, LAST_LOCATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        ?.toLatLng()
+      val location =
+        Tasks.await(client.lastLocation, LAST_LOCATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+      when {
+        location == null -> null
+        // A cached fix can be arbitrarily old. Rotating around one is as damaging as
+        // rotating around no centre at all (invariant 4), so it is rejected here and
+        // the caller falls through to a one-shot fix.
+        !isFixUsable(
+          location.toLatLng(),
+          ageMs = System.currentTimeMillis() - location.time,
+          accuracyMetres = location.accuracy.toDouble(),
+        ) -> {
+          Logger.d(
+            "center: ignoring last known fix — " +
+              "${(System.currentTimeMillis() - location.time) / 1000}s old, " +
+              "accuracy ${location.accuracy}m"
+          )
+          null
+        }
+        else -> location.toLatLng()
+      }
     } catch (error: Throwable) {
       Logger.d("center: getLastLocation failed — ${error.message}")
       null
@@ -115,9 +134,6 @@ class LocationResolver(context: Context) {
   private companion object {
     const val LAST_LOCATION_TIMEOUT_SECONDS = 5L
     const val ONE_SHOT_TIMEOUT_SECONDS = 10L
-
-    /** A two-minute-old fix is fine for picking the nearest 99 of 2000 geofences. */
-    const val MAX_FIX_AGE_MS = 2 * 60 * 1000L
   }
 }
 

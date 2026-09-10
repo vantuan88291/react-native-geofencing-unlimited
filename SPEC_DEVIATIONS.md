@@ -164,7 +164,80 @@ One consequence worth knowing: under `use_frameworks!` the module name becomes
 app importing the public headers by angle bracket would write
 `<react_native_geofencing_unlimited/RNGeofencingCore.h>`.
 
-## 10. The example app gained one dependency — §16
+## 10. Add-before-remove yields to the platform slot cap — §4.4, invariant 3
+
+Invariant 3 requires the adds to happen before the removes, so that a process killed
+between the two leaves a *superset* rather than a hole.
+
+**That reasoning holds only while the superset can physically exist, and on iOS it
+cannot.** iOS caps monitored regions at 20; with 19 armed plus the boundary the app is
+already at the cap, and `startMonitoringForRegion:` past it is rejected outright —
+reported asynchronously as `kCLErrorRegionMonitoringFailure`. A rotation whose set
+changes completely therefore armed almost nothing, and stayed that way until the app
+was killed and relaunched. Android has the same latent flaw with a roomier cap: 99
+armed plus 99 to add exceeds 100 and Play Services rejects the whole batch with
+`GEOFENCE_TOO_MANY_GEOFENCES`.
+
+Applying the invariant literally produced a worse outcome than the hole it was
+protecting against: the *new* regions were silently never armed.
+
+**What was done**, on both platforms:
+
+1. The boundary is taken down **first** — it is re-armed at the new centre at the end
+   of the rotation anyway, and while registered it holds one of the slots the adds
+   need.
+2. If the adds would still exceed the cap, exactly the shortfall is freed first, and
+   **only ever from regions that were being removed anyway** — a region the next set
+   keeps is never taken down early. `toRemove` is sorted furthest-first so the least
+   relevant go first.
+3. The adds run, then the remaining removes, then the boundary goes back up last —
+   still the trigger for the next rotation, so still last.
+
+The superset is therefore preserved whenever it fits, and degrades minimally when it
+cannot.
+
+**Why the tests missed it:** `FakeRegionRegistry` recorded call *order* but modelled no
+slot cap, so it happily accepted a superset no real device would hold. It now enforces
+a `platformMax` and tracks what the "OS" is holding, and three tests cover the full
+iOS-cap rotation, the never-remove-a-keeper rule, and the boundary ordering.
+
+## 11. The rotation centre is chosen by freshness, not by precedence — §4.7
+
+§4.7 gives an ordered list: the triggering event's location, then the last known fix,
+then a one-shot fix, then give up. Taken literally that is a **precedence** rule, and
+implementing it literally produced a real bug on iOS.
+
+`startMonitoringSignificantLocationChanges` hands over whatever position CoreLocation
+last recorded, the instant monitoring begins. Just after the user moves, that is the
+place they moved *from* — recent enough to look valid, but wrong. Rotating on it swapped
+the entire active set to a location kilometres away and emitted synthetic EXITs for
+every region the user was actually still inside; the next rotation swapped it back and
+re-fired ENTER for all of them. Observed on every app launch, for a user standing still.
+
+**What was done**, on top of §4.7's ordering:
+
+1. **A fix must be usable.** Rejected when older than two minutes, when
+   `horizontalAccuracy` is negative, or when the coordinate is not finite. A stale
+   centre is as damaging as a missing one, and invariant 4 covers both in spirit.
+2. **Between the hint and the manager's own last fix, the fresher one wins** — the hint
+   is not automatically preferred. This is what catches the case above, where the SLC
+   fix was only 16 seconds older than the manager's and therefore passed every
+   staleness check.
+3. **§4.7 step 3 was missing entirely on iOS** and is now implemented: when nothing
+   cached is usable, `requestLocation` asks for a fresh fix and the rotation resumes
+   when it arrives, rather than being skipped. Without it the staleness rule of (1)
+   would have stopped rotation altogether on a device standing still, since this module
+   deliberately never calls `startUpdatingLocation` and so has no other way to refresh
+   `manager.location`. A failed request clears the pending flag, or one failure would
+   block every later rotation.
+
+Android had the same latent gap in `lastKnown()` and got the same usability check; its
+one-shot path already existed.
+
+Device-confirmed on the simulator: the SLC hint is now rejected in favour of the
+manager's fix, and a rotation that used to swap 19 regions reports `on=() off=()`.
+
+## 12. The example app gained one dependency — §16
 
 §16 requires the event log to **survive a process kill**, and to be written from the headless task
 as well as the React tree. That needs real persistence, so the example app depends on
@@ -195,6 +268,8 @@ Everything below needs hardware or a full app build, and none of it has been run
 | Full `example` Android build, both architectures | **not run** |
 | Full `example` iOS build, both architectures | **not run** |
 | Every device test in §14 | **not run** |
+| The §10 slot-cap fix on a real device | **not run** — found while driving a simulated route; unit-covered, but on-device confirmation is still owed |
+| The §11 rotation-centre fix | **confirmed on the iOS simulator** — the SLC hint is rejected in favour of the fresher fix, and the spurious ENTER/EXIT burst on every launch is gone |
 | The §10 limits table on real hardware | **not verified** |
 
 The device checklist in §14 is a release gate a human signs off. Green CI does not stand in for it,

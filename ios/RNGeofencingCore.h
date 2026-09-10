@@ -83,6 +83,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)getStateWithCompletion:(void (^)(NSDictionary *state))completion;
 - (void)flushQueueWithCompletion:(void (^)(NSArray<NSDictionary *> *events))completion;
 
+/// Recent native log lines (§14). Produced before JS is running, so JS has to pull them.
+- (void)getDebugLogWithCompletion:(void (^)(NSArray<NSString *> *lines))completion;
+
 /// Flushes anything queued while JS was down, the moment a listener appears (§15.4).
 - (void)jsStartedObserving;
 

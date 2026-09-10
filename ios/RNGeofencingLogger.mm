@@ -2,6 +2,16 @@
 
 static BOOL RNGeofencingDebugEnabled = NO;
 
+/// Bounded — this is a debugging aid, not an archive.
+static const NSUInteger RNGeofencingRingCapacity = 300;
+static NSMutableArray<NSString *> *RNGeofencingRing = nil;
+static NSLock *RNGeofencingRingLock = nil;
+
+__attribute__((constructor)) static void RNGeofencingRingInit(void) {
+  RNGeofencingRing = [NSMutableArray arrayWithCapacity:RNGeofencingRingCapacity];
+  RNGeofencingRingLock = [NSLock new];
+}
+
 @implementation RNGeofencingLogger
 
 + (BOOL)debugEnabled {
@@ -14,6 +24,27 @@ static BOOL RNGeofencingDebugEnabled = NO;
 
 + (void)log:(NSString *)level message:(NSString *)message {
   NSLog(@"[RNGeofencing] %@ %@", level, message);
+
+  long long now = (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
+  [RNGeofencingRingLock lock];
+  if (RNGeofencingRing.count >= RNGeofencingRingCapacity) {
+    [RNGeofencingRing removeObjectAtIndex:0];
+  }
+  [RNGeofencingRing addObject:[NSString stringWithFormat:@"%lld %@ %@", now, level, message]];
+  [RNGeofencingRingLock unlock];
+}
+
++ (NSArray<NSString *> *)snapshot {
+  [RNGeofencingRingLock lock];
+  NSArray<NSString *> *copy = [RNGeofencingRing copy];
+  [RNGeofencingRingLock unlock];
+  return copy;
+}
+
++ (void)clearSnapshot {
+  [RNGeofencingRingLock lock];
+  [RNGeofencingRing removeAllObjects];
+  [RNGeofencingRingLock unlock];
 }
 
 + (void)debug:(NSString *)format, ... {

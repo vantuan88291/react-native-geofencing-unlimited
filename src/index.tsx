@@ -372,6 +372,22 @@ async function flushQueue(): Promise<GeofenceEvent[]> {
   return events;
 }
 
+/**
+ * Recent native log lines, newest last (§14).
+ *
+ * Only populated when `ready({ debug: true })`. Worth knowing *why* this exists rather
+ * than just reading a native log viewer: the module's most interesting logging — the
+ * launch re-arm, and rotations driven from a broadcast receiver or a background
+ * relaunch — happens **before JS is running**, so no JS logger can observe it live.
+ * These lines are buffered natively and pulled on demand, which is what makes them
+ * visible in whatever JS logging you already use.
+ *
+ * Reading does not drain the buffer, so calling it repeatedly is safe.
+ */
+function getDebugLog(): Promise<string[]> {
+  return Native.getDebugLog();
+}
+
 function onGeofence(callback: EventListener): Subscription {
   ensureNativeSubscription();
   eventListeners.add(callback);
@@ -458,6 +474,7 @@ export const Geofencing = {
   openSettings,
   getState,
   flushQueue,
+  getDebugLog,
   onGeofence,
   onGeofencesChange,
   registerHeadlessTask,

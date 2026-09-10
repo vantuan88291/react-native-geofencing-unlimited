@@ -71,6 +71,52 @@ class GeoTest {
     assertEquals(200.0, clamp(1000.0, low = 500.0, high = 200.0), 1e-9)
   }
 
+  // -------------------------------------------------------------------------
+  // isFixUsable — invariant 4
+  // -------------------------------------------------------------------------
+
+  @Test
+  fun `a fresh accurate fix is usable`() {
+    assertTrue(isFixUsable(oslo, ageMs = 5_000, accuracyMetres = 30.0))
+  }
+
+  @Test
+  fun `a stale fix is rejected`() {
+    // The case that actually bit: iOS delivers a cached fix the moment
+    // significant-location-change monitoring starts, hours old and kilometres away.
+    // Rotating on it swaps the whole active set somewhere the user is not, and the
+    // next rotation swaps it back — a burst of synthetic EXITs then re-ENTERs for
+    // regions that were never left.
+    assertTrue(!isFixUsable(oslo, ageMs = 60 * 60 * 1000, accuracyMetres = 30.0))
+  }
+
+  @Test
+  fun `a fix just inside the age limit is still usable`() {
+    assertTrue(isFixUsable(oslo, ageMs = MAX_FIX_AGE_MS - 1, accuracyMetres = 30.0))
+    assertTrue(!isFixUsable(oslo, ageMs = MAX_FIX_AGE_MS + 1, accuracyMetres = 30.0))
+  }
+
+  @Test
+  fun `a negative accuracy means the OS considers the fix invalid`() {
+    assertTrue(!isFixUsable(oslo, ageMs = 0, accuracyMetres = -1.0))
+  }
+
+  @Test
+  fun `a clock skew into the future is treated as fresh, not rejected`() {
+    // Better to rotate on a fix with an odd timestamp than to stop rotating entirely.
+    assertTrue(isFixUsable(oslo, ageMs = -30_000, accuracyMetres = 20.0))
+  }
+
+  @Test
+  fun `an unusable coordinate is rejected however fresh it is`() {
+    assertTrue(!isFixUsable(LatLng(Double.NaN, 0.0), ageMs = 0, accuracyMetres = 5.0))
+  }
+
+  @Test
+  fun `an unknown accuracy does not disqualify a fresh fix`() {
+    assertTrue(isFixUsable(oslo, ageMs = 1_000, accuracyMetres = null))
+  }
+
   @Test
   fun `coordinate validity rejects the values that would arm the wrong regions`() {
     assertTrue(LatLng(0.0, 0.0).isValid)

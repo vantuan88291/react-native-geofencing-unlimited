@@ -1,3 +1,7 @@
+// First, and for its side effect only: it connects Reactotron and wraps `console.*`
+// before any other module gets a chance to log.
+import './src/ReactotronConfig';
+
 import { AppRegistry } from 'react-native';
 import { Geofencing } from 'react-native-geofencing-unlimited';
 import App from './src/App';

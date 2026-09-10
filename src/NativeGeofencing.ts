@@ -126,6 +126,8 @@ export interface Spec extends TurboModule {
   getState(): Promise<StateSpec>;
   /** Drains events buffered while JS was not running (§6.5). */
   flushQueue(): Promise<GeofenceEventPayload[]>;
+  /** Recent native log lines, newest last. Only populated with `debug: true` (§14). */
+  getDebugLog(): Promise<string[]>;
 
   // NativeEventEmitter bookkeeping (§15.4). Required since RN 0.65 — their absence
   // produces a runtime warning on every subscription.

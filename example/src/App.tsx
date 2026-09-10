@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Text,
   View,
+  SafeAreaView,
 } from 'react-native';
 import {
   Geofencing,
@@ -24,6 +25,16 @@ import {
 } from './seed';
 
 /**
+ * When this JS bundle started.
+ *
+ * Any event whose crossing timestamp predates it was queued natively while JS was not
+ * running and has just been flushed. On iOS that is the *only* evidence the
+ * killed-app path worked — there is no headless task to tag it with, so without this
+ * comparison a flushed event is indistinguishable from one that just happened.
+ */
+const APP_STARTED_AT = Date.now();
+
+/**
  * The §16 harness.
  *
  * This is not a demo. It is the **only practical way to validate** the behaviour §14
@@ -38,23 +49,73 @@ export default function App() {
   const [log, setLog] = useState<LogEntry[]>([]);
   const [lastChange, setLastChange] = useState<GeofencesChange | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-
   const mounted = useRef(true);
 
-  const refresh = useCallback(async () => {
-    const [nextState, nextGeofences, nextActive, nextLog] = await Promise.all([
-      Geofencing.getState(),
+  /**
+   * One read of everything, plus whether a rotation landed in the middle of it.
+   *
+   * `getState`, `getGeofences` and `getActiveGeofences` are three separate native
+   * calls. A rotation can complete between them, which pairs distances measured from
+   * the OLD centre with the armed set computed from the NEW one — and that renders as
+   * a jumbled ARMED/off ordering in the Registry panel that looks exactly like a
+   * rotation bug. `rotationCenterAt` read either side is what detects it.
+   */
+  const snapshot = useCallback(async () => {
+    const before = await Geofencing.getState();
+    const [nextGeofences, nextActive, nextLog] = await Promise.all([
       Geofencing.getGeofences(),
       Geofencing.getActiveGeofences(),
       readLog(),
     ]);
+    const after = await Geofencing.getState();
+    return {
+      state: after,
+      geofences: nextGeofences,
+      activeIds: nextActive,
+      log: nextLog,
+      coherent: before.rotationCenterAt === after.rotationCenterAt,
+    };
+  }, []);
+
+  const refresh = useCallback(async () => {
+    let snap = await snapshot();
+    if (!snap.coherent) {
+      // A rotation landed mid-read. One more attempt is enough in practice — they do
+      // not run back to back.
+      snap = await snapshot();
+    }
     if (!mounted.current) {
       return;
     }
-    setState(nextState);
-    setGeofences(nextGeofences);
-    setActiveIds(nextActive);
-    setLog(nextLog);
+    setState(snap.state);
+    setGeofences(snap.geofences);
+    setActiveIds(snap.activeIds);
+    setLog(snap.log);
+  }, [snapshot]);
+
+  /**
+   * Prints the module's own native log through the JS console, so it lands wherever
+   * you already read JS logs (Reactotron, DevTools) instead of needing `logcat` or
+   * Console.app.
+   */
+  const dumpNativeLog = useCallback(async (reason: string) => {
+    const lines = await Geofencing.getDebugLog();
+    if (lines.length === 0) {
+      console.log(
+        `[native log: ${reason}] empty — is ready({ debug: true }) set?`
+      );
+      return;
+    }
+    console.log(
+      `[native log: ${reason}] ${lines.length} line(s)\n` +
+        lines
+          .map((line) => {
+            const [ts, ...rest] = line.split(' ');
+            const at = new Date(Number(ts)).toLocaleTimeString();
+            return `  ${at} ${rest.join(' ')}`;
+          })
+          .join('\n')
+    );
   }, []);
 
   useEffect(() => {
@@ -64,7 +125,10 @@ export default function App() {
     // while JS was down, and the wrapper holds those for the first listener either
     // way — but subscribing first is the pattern to copy.
     const eventSub = Geofencing.onGeofence(async (event) => {
-      await appendEvents([event], 'foreground');
+      await appendEvents(
+        [event],
+        event.timestamp < APP_STARTED_AT ? 'flush' : 'foreground'
+      );
       await refresh();
     });
 
@@ -86,6 +150,10 @@ export default function App() {
         debug: true,
       });
       await refresh();
+
+      // The launch re-arm and any rotation driven from a background wake happen
+      // before JS exists, so those lines can only be read by pulling them.
+      await dumpNativeLog('startup');
     })();
 
     // The first thing to read in any bug report, so it is kept live (§16).
@@ -97,7 +165,7 @@ export default function App() {
       changeSub.remove();
       clearInterval(timer);
     };
-  }, [refresh]);
+  }, [refresh, dumpNativeLog]);
 
   const run = useCallback(
     async (label: string, action: () => Promise<unknown>) => {
@@ -147,303 +215,318 @@ export default function App() {
     : geofences.map((g) => ({ g, distance: Number.NaN }));
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>react-native-geofencing-unlimited</Text>
-      <Text style={styles.subtitle}>
-        {Platform.OS} · {Platform.OS === 'ios' ? '19 of 20' : '99 of 100'} slots
-        usable
-      </Text>
-
-      {busy !== null && (
-        <View style={styles.busy}>
-          <ActivityIndicator />
-          <Text style={styles.busyText}>{busy}…</Text>
-        </View>
-      )}
-
-      {/* ------------------------------------------------------------------ */}
-      <Panel title="State" hint="The first thing to read in any bug report">
-        {state === null ? (
-          <Text style={styles.dim}>loading…</Text>
-        ) : (
-          <>
-            <Row label="enabled" value={String(state.enabled)} />
-            <Row
-              label="available"
-              value={String(state.available)}
-              warn={!state.available}
-            />
-            <Row
-              label="authorization"
-              value={state.authorization}
-              warn={state.authorization !== 'always'}
-            />
-            <Row
-              label="accuracy"
-              value={state.accuracyAuthorization}
-              warn={state.accuracyAuthorization !== 'full'}
-            />
-            <Row label="geofenceCount" value={String(state.geofenceCount)} />
-            <Row label="activeCount" value={String(state.activeCount)} />
-            <Row
-              label="locationServices"
-              value={String(state.locationServicesEnabled)}
-              warn={state.locationServicesEnabled === false}
-            />
-            {Platform.OS === 'android' && (
-              <Row
-                label="batteryOptimized"
-                value={String(state.batteryOptimized)}
-                warn={state.batteryOptimized === true}
-              />
-            )}
-            <Row
-              label="droppedEvents"
-              value={String(state.droppedEventCount ?? 0)}
-              warn={(state.droppedEventCount ?? 0) > 0}
-            />
-          </>
-        )}
-        {state?.authorization !== 'always' && (
-          <Text style={styles.warnNote}>
-            Background region events are only delivered with{' '}
-            <Text style={styles.mono}>always</Text> authorization. Anything else
-            means no crossings while the app is backgrounded.
-          </Text>
-        )}
-      </Panel>
-
-      {/* ------------------------------------------------------------------ */}
-      <Panel
-        title="Permissions"
-        hint="The only way to exercise the §6.7 / §7.1 staging on each API level"
-      >
-        <View style={styles.buttonRow}>
-          <Button
-            label="Request permission"
-            onPress={() =>
-              run('requestPermission', async () => {
-                // Resolves with the resulting state even on denial — branch on the
-                // state, never on a catch (§8.4).
-                const next = await Geofencing.requestPermission();
-                if (next.authorization !== 'always') {
-                  Alert.alert(
-                    'Not enough',
-                    `Got "${next.authorization}". Background delivery needs "always" — use Open settings.`
-                  );
-                }
-              })
-            }
-          />
-          <Button
-            label="Open settings"
-            onPress={() => run('openSettings', Geofencing.openSettings)}
-          />
-        </View>
-        <Text style={styles.dim}>
-          Show your rationale before pressing this, not after — Play Store
-          policy does not accept one shown afterwards.
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+        <Text style={styles.title}>react-native-geofencing-unlimited</Text>
+        <Text style={styles.subtitle}>
+          {Platform.OS} · {Platform.OS === 'ios' ? '19 of 20' : '99 of 100'}{' '}
+          slots usable
         </Text>
-      </Panel>
 
-      {/* ------------------------------------------------------------------ */}
-      <Panel
-        title="Seed"
-        hint="300 is the number that forces rotation on both platforms"
-      >
-        {rotationCenter === null ? (
-          <Text style={styles.warnNote}>
-            No rotation centre yet. Grant permission, then press{' '}
-            <Text style={styles.mono}>start</Text> — geofences are seeded around
-            the centre the module resolved, so this app needs no location
-            dependency of its own.
+        {busy !== null && (
+          <View style={styles.busy}>
+            <ActivityIndicator />
+            <Text style={styles.busyText}>{busy}…</Text>
+          </View>
+        )}
+
+        {/* ------------------------------------------------------------------ */}
+        <Panel title="State" hint="The first thing to read in any bug report">
+          {state === null ? (
+            <Text style={styles.dim}>loading…</Text>
+          ) : (
+            <>
+              <Row label="enabled" value={String(state.enabled)} />
+              <Row
+                label="available"
+                value={String(state.available)}
+                warn={!state.available}
+              />
+              <Row
+                label="authorization"
+                value={state.authorization}
+                warn={state.authorization !== 'always'}
+              />
+              <Row
+                label="accuracy"
+                value={state.accuracyAuthorization}
+                warn={state.accuracyAuthorization !== 'full'}
+              />
+              <Row label="geofenceCount" value={String(state.geofenceCount)} />
+              <Row label="activeCount" value={String(state.activeCount)} />
+              <Row
+                label="locationServices"
+                value={String(state.locationServicesEnabled)}
+                warn={state.locationServicesEnabled === false}
+              />
+              {Platform.OS === 'android' && (
+                <Row
+                  label="batteryOptimized"
+                  value={String(state.batteryOptimized)}
+                  warn={state.batteryOptimized === true}
+                />
+              )}
+              <Row
+                label="droppedEvents"
+                value={String(state.droppedEventCount ?? 0)}
+                warn={(state.droppedEventCount ?? 0) > 0}
+              />
+            </>
+          )}
+          {state?.authorization !== 'always' && (
+            <Text style={styles.warnNote}>
+              Background region events are only delivered with{' '}
+              <Text style={styles.mono}>always</Text> authorization. Anything
+              else means no crossings while the app is backgrounded.
+            </Text>
+          )}
+        </Panel>
+
+        {/* ------------------------------------------------------------------ */}
+        <Panel
+          title="Permissions"
+          hint="The only way to exercise the §6.7 / §7.1 staging on each API level"
+        >
+          <View style={styles.buttonRow}>
+            <Button
+              label="Request permission"
+              onPress={() =>
+                run('requestPermission', async () => {
+                  // Resolves with the resulting state even on denial — branch on the
+                  // state, never on a catch (§8.4).
+                  const next = await Geofencing.requestPermission();
+                  if (next.authorization !== 'always') {
+                    Alert.alert(
+                      'Not enough',
+                      `Got "${next.authorization}". Background delivery needs "always" — use Open settings.`
+                    );
+                  }
+                })
+              }
+            />
+            <Button
+              label="Open settings"
+              onPress={() => run('openSettings', Geofencing.openSettings)}
+            />
+          </View>
+          <Text style={styles.dim}>
+            Show your rationale before pressing this, not after — Play Store
+            policy does not accept one shown afterwards.
           </Text>
-        ) : null}
-        <View style={styles.buttonRow}>
-          <Button
-            label="Add 10"
-            disabled={rotationCenter === null}
-            onPress={() => seed(10)}
+        </Panel>
+
+        {/* ------------------------------------------------------------------ */}
+        <Panel
+          title="Seed"
+          hint="300 is the number that forces rotation on both platforms"
+        >
+          {rotationCenter === null ? (
+            <Text style={styles.warnNote}>
+              No rotation centre yet. Grant permission, then press{' '}
+              <Text style={styles.mono}>start</Text> — geofences are seeded
+              around the centre the module resolved, so this app needs no
+              location dependency of its own.
+            </Text>
+          ) : null}
+          <View style={styles.buttonRow}>
+            <Button
+              label="Add 10"
+              disabled={rotationCenter === null}
+              onPress={() => seed(10)}
+            />
+            <Button
+              label="Add 300"
+              disabled={rotationCenter === null}
+              onPress={() => seed(300)}
+            />
+            <Button
+              label="Add 2000"
+              disabled={rotationCenter === null}
+              onPress={() => seed(2000)}
+            />
+          </View>
+          <View style={styles.buttonRow}>
+            <Button
+              label="Dense cluster (25 in 120 m)"
+              disabled={rotationCenter === null}
+              onPress={() =>
+                run('Dense cluster', async () => {
+                  if (rotationCenter === null) {
+                    return;
+                  }
+                  // The §4.3 degenerate case: more regions inside 500 m than iOS has
+                  // slots, so the boundary clamps up and overlaps excluded regions.
+                  await Geofencing.addGeofences(
+                    seedDenseCluster(rotationCenter)
+                  );
+                })
+              }
+            />
+          </View>
+        </Panel>
+
+        {/* ------------------------------------------------------------------ */}
+        <Panel
+          title="Boundary"
+          hint="When this stops updating as you move, rotation has stalled"
+        >
+          <Row
+            label="centre"
+            value={
+              rotationCenter
+                ? `${rotationCenter.latitude.toFixed(5)}, ${rotationCenter.longitude.toFixed(5)}`
+                : '—'
+            }
           />
-          <Button
-            label="Add 300"
-            disabled={rotationCenter === null}
-            onPress={() => seed(300)}
+          <Row
+            label="radius"
+            value={
+              state?.boundaryRadius != null
+                ? `${Math.round(state.boundaryRadius)} m`
+                : 'none (whole set fits)'
+            }
           />
-          <Button
-            label="Add 2000"
-            disabled={rotationCenter === null}
-            onPress={() => seed(2000)}
+          <Row
+            label="computed"
+            value={
+              state?.rotationCenterAt != null
+                ? new Date(state.rotationCenterAt).toLocaleTimeString()
+                : '—'
+            }
           />
-        </View>
-        <View style={styles.buttonRow}>
+          {lastChange !== null && (
+            <Row
+              label="last diff"
+              value={`+${lastChange.on.length} / -${lastChange.off.length}`}
+            />
+          )}
+        </Panel>
+
+        {/* ------------------------------------------------------------------ */}
+        <Panel
+          title={`Registry — ${activeIds.length} armed of ${geofences.length}`}
+          hint={
+            Platform.OS === 'android'
+              ? 'Android has no read API, so "armed" is what we believe (§4.6)'
+              : 'iOS answers from monitoredRegions — the OS’s own registry (§4.6)'
+          }
+        >
+          {sorted.length === 0 ? (
+            <Text style={styles.dim}>nothing registered</Text>
+          ) : (
+            <>
+              <Text style={styles.dim}>
+                Sorted by distance. The armed ones must be the nearest N — a gap
+                in that ordering is a rotation bug.
+              </Text>
+              {sorted.slice(0, 25).map(({ g, distance }) => (
+                <View key={g.identifier} style={styles.registryRow}>
+                  <Text
+                    style={[
+                      styles.badge,
+                      activeSet.has(g.identifier)
+                        ? styles.badgeOn
+                        : styles.badgeOff,
+                    ]}
+                  >
+                    {activeSet.has(g.identifier) ? 'ARMED' : 'off'}
+                  </Text>
+                  <Text style={styles.registryId} numberOfLines={1}>
+                    {g.identifier}
+                  </Text>
+                  <Text style={styles.registryDistance}>
+                    {Number.isNaN(distance) ? '—' : `${Math.round(distance)} m`}
+                  </Text>
+                </View>
+              ))}
+              {sorted.length > 25 && (
+                <Text style={styles.dim}>…and {sorted.length - 25} more</Text>
+              )}
+            </>
+          )}
+        </Panel>
+
+        {/* ------------------------------------------------------------------ */}
+        <Panel title="Queue" hint="Proves killed-app events actually survived">
           <Button
-            label="Dense cluster (25 in 120 m)"
-            disabled={rotationCenter === null}
+            label="flushQueue()"
             onPress={() =>
-              run('Dense cluster', async () => {
-                if (rotationCenter === null) {
-                  return;
-                }
-                // The §4.3 degenerate case: more regions inside 500 m than iOS has
-                // slots, so the boundary clamps up and overlaps excluded regions.
-                await Geofencing.addGeofences(seedDenseCluster(rotationCenter));
+              run('flushQueue', async () => {
+                const events = await Geofencing.flushQueue();
+                await appendEvents(events, 'flush');
+                Alert.alert('Flushed', `${events.length} queued event(s)`);
               })
             }
           />
-        </View>
-      </Panel>
+        </Panel>
 
-      {/* ------------------------------------------------------------------ */}
-      <Panel
-        title="Boundary"
-        hint="When this stops updating as you move, rotation has stalled"
-      >
-        <Row
-          label="centre"
-          value={
-            rotationCenter
-              ? `${rotationCenter.latitude.toFixed(5)}, ${rotationCenter.longitude.toFixed(5)}`
-              : '—'
-          }
-        />
-        <Row
-          label="radius"
-          value={
-            state?.boundaryRadius != null
-              ? `${Math.round(state.boundaryRadius)} m`
-              : 'none (whole set fits)'
-          }
-        />
-        <Row
-          label="computed"
-          value={
-            state?.rotationCenterAt != null
-              ? new Date(state.rotationCenterAt).toLocaleTimeString()
-              : '—'
-          }
-        />
-        {lastChange !== null && (
-          <Row
-            label="last diff"
-            value={`+${lastChange.on.length} / -${lastChange.off.length}`}
-          />
-        )}
-      </Panel>
-
-      {/* ------------------------------------------------------------------ */}
-      <Panel
-        title={`Registry — ${activeIds.length} armed of ${geofences.length}`}
-        hint={
-          Platform.OS === 'android'
-            ? 'Android has no read API, so "armed" is what we believe (§4.6)'
-            : 'iOS answers from monitoredRegions — the OS’s own registry (§4.6)'
-        }
-      >
-        {sorted.length === 0 ? (
-          <Text style={styles.dim}>nothing registered</Text>
-        ) : (
-          <>
+        {/* ------------------------------------------------------------------ */}
+        <Panel
+          title={`Event log — ${log.length}`}
+          hint="synthetic-vs-real and headless-vs-foreground are invisible anywhere else"
+        >
+          {log.length === 0 ? (
             <Text style={styles.dim}>
-              Sorted by distance. The armed ones must be the nearest N — a gap
-              in that ordering is a rotation bug.
+              no events yet — simulate a location crossing
             </Text>
-            {sorted.slice(0, 25).map(({ g, distance }) => (
-              <View key={g.identifier} style={styles.registryRow}>
-                <Text
-                  style={[
-                    styles.badge,
-                    activeSet.has(g.identifier)
-                      ? styles.badgeOn
-                      : styles.badgeOff,
-                  ]}
-                >
-                  {activeSet.has(g.identifier) ? 'ARMED' : 'off'}
+          ) : (
+            log.slice(0, 40).map((entry, index) => (
+              <View key={`${entry.at}-${index}`} style={styles.logRow}>
+                <Text style={styles.logAction}>{entry.action}</Text>
+                <Text style={styles.logId} numberOfLines={1}>
+                  {entry.identifier}
                 </Text>
-                <Text style={styles.registryId} numberOfLines={1}>
-                  {g.identifier}
-                </Text>
-                <Text style={styles.registryDistance}>
-                  {Number.isNaN(distance) ? '—' : `${Math.round(distance)} m`}
+                <Text style={styles.logMeta}>
+                  {new Date(entry.timestamp).toLocaleTimeString()}
+                  {entry.synthetic ? ' ·synthetic' : ''}
+                  {entry.approximate ? ' ·approx' : ''}
+                  {entry.source === 'headless' ? ' ·[headless]' : ''}
+                  {entry.source === 'flush' ? ' ·[flushed]' : ''}
                 </Text>
               </View>
-            ))}
-            {sorted.length > 25 && (
-              <Text style={styles.dim}>…and {sorted.length - 25} more</Text>
-            )}
-          </>
-        )}
-      </Panel>
+            ))
+          )}
+        </Panel>
 
-      {/* ------------------------------------------------------------------ */}
-      <Panel title="Queue" hint="Proves killed-app events actually survived">
-        <Button
-          label="flushQueue()"
-          onPress={() =>
-            run('flushQueue', async () => {
-              const events = await Geofencing.flushQueue();
-              await appendEvents(events, 'flush');
-              Alert.alert('Flushed', `${events.length} queued event(s)`);
-            })
-          }
-        />
-      </Panel>
+        {/* ------------------------------------------------------------------ */}
+        <Panel title="Controls">
+          <View style={styles.buttonRow}>
+            <Button
+              label="start()"
+              onPress={() => run('start', Geofencing.start)}
+            />
+            <Button
+              label="stop()"
+              onPress={() => run('stop', Geofencing.stop)}
+            />
+          </View>
+          <View style={styles.buttonRow}>
+            <Button
+              label="removeGeofences()"
+              onPress={() => run('removeGeofences', Geofencing.removeGeofences)}
+            />
+            <Button
+              label="Clear log"
+              onPress={() => run('Clear log', clearLog)}
+            />
+          </View>
+          <View style={styles.buttonRow}>
+            <Button
+              label="Dump native log"
+              onPress={() =>
+                run('Dump native log', () => dumpNativeLog('manual'))
+              }
+            />
+          </View>
+        </Panel>
 
-      {/* ------------------------------------------------------------------ */}
-      <Panel
-        title={`Event log — ${log.length}`}
-        hint="synthetic-vs-real and headless-vs-foreground are invisible anywhere else"
-      >
-        {log.length === 0 ? (
-          <Text style={styles.dim}>
-            no events yet — simulate a location crossing
-          </Text>
-        ) : (
-          log.slice(0, 40).map((entry, index) => (
-            <View key={`${entry.at}-${index}`} style={styles.logRow}>
-              <Text style={styles.logAction}>{entry.action}</Text>
-              <Text style={styles.logId} numberOfLines={1}>
-                {entry.identifier}
-              </Text>
-              <Text style={styles.logMeta}>
-                {new Date(entry.timestamp).toLocaleTimeString()}
-                {entry.synthetic ? ' ·synthetic' : ''}
-                {entry.approximate ? ' ·approx' : ''}
-                {entry.source === 'headless' ? ' ·[headless]' : ''}
-                {entry.source === 'flush' ? ' ·[flushed]' : ''}
-              </Text>
-            </View>
-          ))
-        )}
-      </Panel>
-
-      {/* ------------------------------------------------------------------ */}
-      <Panel title="Controls">
-        <View style={styles.buttonRow}>
-          <Button
-            label="start()"
-            onPress={() => run('start', Geofencing.start)}
-          />
-          <Button label="stop()" onPress={() => run('stop', Geofencing.stop)} />
-        </View>
-        <View style={styles.buttonRow}>
-          <Button
-            label="removeGeofences()"
-            onPress={() => run('removeGeofences', Geofencing.removeGeofences)}
-          />
-          <Button
-            label="Clear log"
-            onPress={() => run('Clear log', clearLog)}
-          />
-        </View>
-      </Panel>
-
-      <Text style={styles.footer}>
-        Device checks that no CI job can do: swipe the app away and cross a
-        region; reboot and cross a region without opening the app; revoke
-        background location in Settings while it runs.
-      </Text>
-    </ScrollView>
+        <Text style={styles.footer}>
+          Device checks that no CI job can do: swipe the app away and cross a
+          region; reboot and cross a region without opening the app; revoke
+          background location in Settings while it runs.
+        </Text>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -509,6 +592,7 @@ function Button({
 }
 
 const styles = StyleSheet.create({
+  safeArea: { flex: 1 },
   screen: { flex: 1, backgroundColor: '#f4f4f5' },
   content: { padding: 16, paddingBottom: 48, gap: 12 },
   title: { fontSize: 20, fontWeight: '700', color: '#18181b' },

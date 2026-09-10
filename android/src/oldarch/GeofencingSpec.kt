@@ -59,6 +59,8 @@ abstract class GeofencingSpec internal constructor(context: ReactApplicationCont
 
   abstract fun flushQueue(promise: Promise)
 
+  abstract fun getDebugLog(promise: Promise)
+
   // Required by NativeEventEmitter since RN 0.65 — no-ops, but their absence produces
   // a runtime warning on every subscription. Under the New Architecture the generated
   // spec already declares them; here they have to be written by hand (§15.3).

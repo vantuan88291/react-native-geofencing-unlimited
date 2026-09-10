@@ -7189,6 +7189,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"mitt@npm:^3.0.1":
+  version: 3.0.1
+  resolution: "mitt@npm:3.0.1"
+  checksum: 10c0/3ab4fdecf3be8c5255536faa07064d05caa3dd332bd318ff02e04621f7b3069ca1de9106cfe8e7ced675abfc2bec2ce4c4ef321c4a1bb1fb29df8ae090741913
+  languageName: node
+  linkType: hard
+
 "mkdirp@npm:^1.0.4":
   version: 1.0.4
   resolution: "mkdirp@npm:1.0.4"
@@ -7921,6 +7928,7 @@ __metadata:
     react-native: "npm:0.87.1"
     react-native-builder-bob: "npm:^0.43.0"
     react-native-monorepo-config: "npm:^0.4.0"
+    reactotron-react-native: "npm:^5.3.1"
   languageName: unknown
   linkType: soft
 
@@ -8022,6 +8030,35 @@ __metadata:
   version: 19.2.3
   resolution: "react@npm:19.2.3"
   checksum: 10c0/094220b3ba3a76c1b668f972ace1dd15509b157aead1b40391d1c8e657e720c201d9719537375eff08f5e0514748c0319063392a6f000e31303aafc4471f1436
+  languageName: node
+  linkType: hard
+
+"reactotron-core-client@npm:2.10.0":
+  version: 2.10.0
+  resolution: "reactotron-core-client@npm:2.10.0"
+  dependencies:
+    reactotron-core-contract: "npm:0.4.0"
+  checksum: 10c0/eb6634176564ff5a200e31cc9a5f42669ed621dc88250f970aba405019e6d077e56342ef477ea5a929bf70eaec82607717bf72129caf87491f199f4a2f7c08fb
+  languageName: node
+  linkType: hard
+
+"reactotron-core-contract@npm:0.4.0":
+  version: 0.4.0
+  resolution: "reactotron-core-contract@npm:0.4.0"
+  checksum: 10c0/22ddf3766cd7937f1fd447f1094320a90072b3a0df75ce25917d5899b5ac4221ca62ccf244082c121789bcb2df35f1cfedd9ba083e20ba2a05561cd00f397027
+  languageName: node
+  linkType: hard
+
+"reactotron-react-native@npm:^5.3.1":
+  version: 5.3.1
+  resolution: "reactotron-react-native@npm:5.3.1"
+  dependencies:
+    mitt: "npm:^3.0.1"
+    reactotron-core-client: "npm:2.10.0"
+    reactotron-core-contract: "npm:0.4.0"
+  peerDependencies:
+    react-native: ">=0.40.0"
+  checksum: 10c0/cc8e526b0c89a8bd1285e36c37ab9d9ba0f80fac6f4f6f5e42ec8ca575152e82a6aebddf0e51a27d311b5ed391bac95920a35e9c4ad104e465dc697a566a80c5
   languageName: node
   linkType: hard
 

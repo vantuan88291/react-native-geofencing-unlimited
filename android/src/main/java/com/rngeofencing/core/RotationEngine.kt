@@ -134,7 +134,49 @@ class RotationEngine(
     // the OS-visible definition changed, so such a region is absent from currentIds
     // and lands in toAdd (see PrefsGeofenceStore.upsert).
     val toAdd = if (forceReAddAll) next else next.filter { !currentIds.contains(it.id) }
-    val toRemove = currentIds.filter { !nextIds.contains(it) }
+
+    // Furthest-first, so that when slots have to be freed below it is the least
+    // relevant regions that go first.
+    val toRemove =
+      currentIds
+        .filter { !nextIds.contains(it) }
+        .sortedByDescending { id ->
+          store.get(id)?.let { haversine(center, it) } ?: Double.MAX_VALUE
+        }
+
+    // The boundary comes down first. It is re-armed at the new centre at the end of
+    // this method anyway, and while it is registered it holds one of the platform's
+    // slots — the very slot the adds below may need.
+    registry.removeBoundary()
+
+    // **The platform cap is hard, and add-before-remove cannot exceed it.**
+    //
+    // Invariant 3 wants the adds to happen first, so that a process killed between
+    // the two calls leaves a superset rather than a hole. That reasoning holds only
+    // while the superset can actually exist: iOS refuses beyond 20 monitored regions
+    // and Play Services beyond 100, and the surplus is rejected outright — leaving
+    // the *new* regions unarmed, silently, which is far worse than the hole the
+    // invariant was protecting against.
+    //
+    // So the superset is kept whenever it fits, and when it does not, exactly the
+    // shortfall is freed first — and only ever from regions that were being removed
+    // anyway. A region we intend to keep is never taken down early.
+    val platformMax = capacity + 1
+    val overflow = (currentIds + toAdd.map { it.id }).size - capacity
+    val preRemove = if (overflow > 0) toRemove.take(overflow) else emptyList()
+
+    if (preRemove.isNotEmpty()) {
+      Logger.w(
+        "rotation: freeing ${preRemove.size} slot(s) before adding — " +
+          "${currentIds.size} armed + ${toAdd.size} to add would exceed the platform " +
+          "cap of $platformMax"
+      )
+      when (val result = registry.removeRegions(preRemove)) {
+        is RegistryResult.Success -> store.setActive(preRemove, active = false)
+        is RegistryResult.Failure ->
+          Logger.w("rotation: could not free slots — ${result.message}")
+      }
+    }
 
     val failed = mutableListOf<String>()
     val added = mutableListOf<GeofenceRecord>()
@@ -159,9 +201,11 @@ class RotationEngine(
       }
     }
 
-    if (toRemove.isNotEmpty()) {
-      when (val result = registry.removeRegions(toRemove)) {
-        is RegistryResult.Success -> store.setActive(toRemove, active = false)
+    // Whatever was not already freed above.
+    val deferredRemove = toRemove.drop(preRemove.size)
+    if (deferredRemove.isNotEmpty()) {
+      when (val result = registry.removeRegions(deferredRemove)) {
+        is RegistryResult.Success -> store.setActive(deferredRemove, active = false)
         is RegistryResult.Failure ->
           // Still armed at OS level, so the flag stays true and the region keeps
           // reporting. Harmless: a superset detects everything.
@@ -169,8 +213,8 @@ class RotationEngine(
       }
     }
 
-    // Boundary last, and always torn down first so a stale centre cannot linger.
-    registry.removeBoundary()
+    // Boundary last: it is the trigger for the next rotation, and re-arming it before
+    // the set is in place would race a fast-moving user.
     if (boundaryRadius != null) {
       when (val result = registry.addBoundary(center, boundaryRadius)) {
         is RegistryResult.Success -> Unit

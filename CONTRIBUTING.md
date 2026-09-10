@@ -83,6 +83,33 @@ yarn test
 
 
 
+### Logging
+
+React Native 0.87 no longer forwards `console.*` to the Metro terminal — the code is
+still in `Libraries/Core/setUpDeveloperTools.js`, gated behind `console._isPolyfilled`,
+which nothing sets any more. So the example app ships
+[Reactotron](https://github.com/infinitered/reactotron) instead: it opens its own
+socket on port 9090, independent of Metro.
+
+1. Install the desktop app (`brew install --cask reactotron`, or from the releases page).
+2. Start it **before** the app.
+3. Android only — forward the port, or nothing will connect:
+
+   ```sh
+   adb reverse tcp:9090 tcp:9090
+   ```
+
+`example/src/ReactotronConfig.js` mirrors plain `console.log`/`warn`/`error` into
+Reactotron, so existing logging shows up with no call-site changes. `console.tron.log()`
+is there for anything you want to send explicitly.
+
+Two things Reactotron cannot see, because they happen outside the JS runtime:
+
+```sh
+adb logcat -s RNGeofencing    # the module's own native log (needs `debug: true`)
+adb logcat -s ReactNativeJS   # JS logs from the headless task, i.e. app killed
+```
+
 ### Scripts
 
 The `package.json` file contains various scripts for common tasks:

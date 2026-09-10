@@ -204,6 +204,13 @@ RCT_EXPORT_METHOD(flushQueue
       flushQueueWithCompletion:^(NSArray<NSDictionary *> *events) { resolve(events); }];
 }
 
+RCT_EXPORT_METHOD(getDebugLog
+                  : (RCTPromiseResolveBlock)resolve reject
+                  : (RCTPromiseRejectBlock)reject) {
+  [RNGeofencingCore.sharedInstance
+      getDebugLogWithCompletion:^(NSArray<NSString *> *lines) { resolve(lines); }];
+}
+
 #pragma mark - Helpers
 
 /// Maps an [NSError] carrying a §8.4 code onto the promise.

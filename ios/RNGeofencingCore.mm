@@ -9,6 +9,35 @@
 /// Layer 1 of the dwell emulation only helps below this; see §7.4.
 static const NSTimeInterval RNGeofenceMaxSchedulableDwellMs = 25000.0;
 
+/**
+ * The oldest a fix may be before it is unfit to rotate around.
+ *
+ * Two minutes: the rotation only has to pick the nearest 19 geofences, so a slightly
+ * old fix is fine, while a genuinely stale one is not.
+ */
+static const NSTimeInterval RNGeofenceMaxFixAgeSeconds = 120.0;
+
+/**
+ * Whether a location may be used as a rotation centre (invariant 4).
+ *
+ * Rejecting a **stale** fix matters as much as rejecting a missing one, and it is the
+ * easier mistake to make. `startMonitoringSignificantLocationChanges` delivers a saved
+ * fix the instant monitoring begins, and it can be hours old and kilometres away.
+ * Rotating on one swaps the whole active set to somewhere the user is not; the next
+ * rotation swaps it straight back, and the host app sees a burst of synthetic EXITs
+ * followed by re-ENTERs for regions that were never left.
+ */
+static BOOL RNGeofenceIsFixUsable(CLLocation *_Nullable location) {
+  if (location == nil || !CLLocationCoordinate2DIsValid(location.coordinate)) {
+    return NO;
+  }
+  // A negative accuracy is CoreLocation's way of saying the fix is invalid.
+  if (location.horizontalAccuracy < 0) {
+    return NO;
+  }
+  return -[location.timestamp timeIntervalSinceNow] <= RNGeofenceMaxFixAgeSeconds;
+}
+
 static long long RNGeofenceNow(void) {
   return (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
 }
@@ -47,6 +76,10 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
   NSMutableDictionary<NSString *, NSNumber *> *_dwellBackgroundTasks;
 
   BOOL _significantChangesRunning;
+
+  /// A one-shot `requestLocation` is in flight for a rotation that had no usable fix (§4.7).
+  BOOL _awaitingFreshFix;
+  RNGeofenceRotationTrigger _pendingRotationTrigger;
 }
 
 #pragma mark - Launch hook (mechanism C, §18.3)
@@ -104,6 +137,7 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
     _dwellBackgroundTasks = [NSMutableDictionary new];
     _awaitingAlwaysUpgrade = NO;
     _significantChangesRunning = NO;
+    _awaitingFreshFix = NO;
 
     _store = [RNGeofencingStore new];
     [_store load];
@@ -332,6 +366,10 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
   });
 }
 
+- (void)getDebugLogWithCompletion:(void (^)(NSArray<NSString *> *))completion {
+  completion([RNGeofencingLogger snapshot]);
+}
+
 - (void)jsStartedObserving {
   dispatch_async(self.queue, ^{
     id<RNGeofencingEventDelegate> delegate = self.eventDelegate;
@@ -440,19 +478,61 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
     return;
   }
 
-  CLLocation *resolved = hint ?: RNGeofenceManagerLocation(self.manager);
-  if (resolved == nil || !CLLocationCoordinate2DIsValid(resolved.coordinate)) {
-    // Keeping the stale set is deliberate: a rotation around a bogus centre arms the
-    // wrong regions everywhere (invariant 4). This is not an error path — it resolves,
-    // logs, and retries on the next trigger (§8.4).
-    [RNGeofencingLogger warn:@"rotate: no centre could be resolved, keeping the current set"];
+  // Take the **freshest** usable fix, never simply the hint.
+  //
+  // A significant-location-change update can carry a position the device has already
+  // left: CoreLocation hands over whatever it last recorded, which just after a move
+  // is the place you moved *from*. It passes the staleness check — it is genuinely
+  // recent — but it is the wrong place, and rotating on it swaps the whole active set
+  // away and back again, which the host app sees as synthetic EXITs followed by
+  // re-ENTERs for regions never left. The manager's own last fix is newer in exactly
+  // that window, so age is what decides between them.
+  CLLocation *managerFix = RNGeofenceManagerLocation(self.manager);
+  BOOL hintUsable = RNGeofenceIsFixUsable(hint);
+  BOOL managerUsable = RNGeofenceIsFixUsable(managerFix);
+
+  CLLocation *resolved = nil;
+  if (hintUsable && managerUsable) {
+    BOOL hintIsNewer =
+        [hint.timestamp compare:managerFix.timestamp] == NSOrderedDescending;
+    resolved = hintIsNewer ? hint : managerFix;
+    if (!hintIsNewer) {
+      [RNGeofencingLogger debug:@"centre: hint is %.0fs older than the manager's fix, using the "
+                                @"manager's",
+                                [managerFix.timestamp timeIntervalSinceDate:hint.timestamp]];
+    }
+  } else if (hintUsable) {
+    resolved = hint;
+  } else if (managerUsable) {
+    resolved = managerFix;
+  }
+
+  if (resolved == nil) {
+    // Step 3 of §4.7: ask for a fix rather than giving up.
+    //
+    // This module never calls `startUpdatingLocation`, so `manager.location` only
+    // refreshes when a region event or a significant-location-change arrives. Standing
+    // still long enough therefore ages out *every* cached fix — and without this, the
+    // rotation would simply stop happening, which is a worse failure than the stale
+    // centre the usability check exists to prevent.
+    [RNGeofencingLogger warn:@"rotate(%ld): no usable cached fix, requesting a fresh one",
+                             (long)trigger];
+    [self requestFreshFixForTrigger:trigger];
     return;
   }
 
   CLLocationCoordinate2D center = resolved.coordinate;
   RNGeofenceActiveSet *computed = [self.engine computeActiveSetAround:center];
-  [RNGeofencingLogger debug:@"rotate(%ld): %ld of %ld geofence(s) selected", (long)trigger,
-                            (long)computed.active.count, (long)[self.store count]];
+  // The centre's age and provenance are what distinguish a real move from a rotation
+  // driven by a position the device has already left.
+  [RNGeofencingLogger debug:@"rotate(%ld): %ld of %ld selected — centre %@ (%.5f, %.5f) "
+                            @"%.0fs old, accuracy %.0fm",
+                            (long)trigger, (long)computed.active.count,
+                            (long)[self.store count],
+                            (resolved == hint) ? @"from hint" : @"from manager",
+                            center.latitude, center.longitude,
+                            -[resolved.timestamp timeIntervalSinceNow],
+                            resolved.horizontalAccuracy];
 
   RNGeofenceRotationResult *result = [self.engine applyActiveSet:computed.active
                                                   boundaryRadius:computed.boundaryRadius
@@ -474,6 +554,30 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
   }
 
   [self.store synchronizeNow];
+}
+
+/**
+ * One-shot fix for a rotation that had nothing usable cached (§4.7 step 3).
+ *
+ * `requestLocation` delivers exactly once, through `didUpdateLocations`, and the
+ * pending flag is what tells that callback the update belongs to a rotation rather
+ * than to significant-location-change monitoring. Only one is ever in flight, so a
+ * rotation that still cannot resolve a centre cannot loop.
+ */
+- (void)requestFreshFixForTrigger:(RNGeofenceRotationTrigger)trigger {
+  if (_awaitingFreshFix) {
+    return;
+  }
+  CLAuthorizationStatus status = [self authorizationStatus];
+  if (status != kCLAuthorizationStatusAuthorizedAlways &&
+      status != kCLAuthorizationStatusAuthorizedWhenInUse) {
+    [RNGeofencingLogger warn:@"rotate: no authorization, keeping the current set"];
+    return;
+  }
+
+  _awaitingFreshFix = YES;
+  _pendingRotationTrigger = trigger;
+  dispatch_async(dispatch_get_main_queue(), ^{ [self.manager requestLocation]; });
 }
 
 /// §7.6 — a backstop in case a boundary EXIT is missed. ~500 m / 5 min, negligible battery.
@@ -564,6 +668,14 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
   }
 }
 
+/// Without clearing the pending flag here, one failed `requestLocation` would block
+/// every future rotation that needs a fresh fix.
+- (void)locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error {
+  [RNGeofencingLogger warn:@"location request failed: %@ (CLError %ld)",
+                           error.localizedDescription, (long)error.code];
+  dispatch_async(self.queue, ^{ self->_awaitingFreshFix = NO; });
+}
+
 - (void)locationManagerDidChangeAuthorization:(CLLocationManager *)manager {
   dispatch_async(self.queue, ^{
     CLAuthorizationStatus status = [self authorizationStatus];
@@ -595,6 +707,34 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
   if (latest == nil) {
     return;
   }
+
+  // A fix we asked for explicitly belongs to a rotation that had nothing cached, so it
+  // is used regardless of which trigger started it.
+  dispatch_async(self.queue, ^{
+    if (!self->_awaitingFreshFix) {
+      return;
+    }
+    self->_awaitingFreshFix = NO;
+    RNGeofenceRotationTrigger trigger = self->_pendingRotationTrigger;
+    [RNGeofencingLogger debug:@"centre: one-shot fix arrived, resuming rotate(%ld)",
+                              (long)trigger];
+    [self resolvePendingDwells];
+    if (self.store.meta.enabled) {
+      [self rotateWithTrigger:trigger hint:latest];
+    }
+  });
+
+  // The first update after `startMonitoringSignificantLocationChanges` is a cached fix
+  // that CoreLocation had lying around — routinely hours old and kilometres away.
+  // Rotating on it is what produced a burst of synthetic EXITs followed by re-ENTERs
+  // on every launch, for a user who had not moved at all.
+  if (!RNGeofenceIsFixUsable(latest)) {
+    [RNGeofencingLogger debug:@"SLC update ignored: fix is %.0fs old, accuracy %.0fm",
+                              -[latest.timestamp timeIntervalSinceNow],
+                              latest.horizontalAccuracy];
+    return;
+  }
+
   dispatch_async(self.queue, ^{
     [self resolvePendingDwells];
     if (self.store.meta.enabled) {
@@ -777,6 +917,10 @@ static CLLocation *_Nullable RNGeofenceManagerLocation(CLLocationManager *manage
     for (RNGeofenceEvent *event in events) {
       [delegate emitGeofenceEvent:[event toPayload]];
     }
+    // The gate has just moved this geofence's INSIDE/OUTSIDE state, and that write is
+    // what stops the next launch re-reporting the same crossing. Force it out here
+    // too, not only on the queueing path below.
+    [self.store synchronizeNow];
     [RNGeofencingLogger debug:@"delivered %ld event(s) to JS", (long)events.count];
     return;
   }

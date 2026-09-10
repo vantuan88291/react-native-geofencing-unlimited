@@ -193,9 +193,12 @@ class RotationEngineTest {
     )
 
     // Invariant 3: a kill between the two calls must leave a superset, never a hole.
-    // And the boundary goes last, because it triggers the next rotation.
+    //
+    // The boundary comes down first — it holds a platform slot the adds may need, and
+    // it is re-armed at the new centre regardless — and goes back up last, because it
+    // is the trigger for the next rotation.
     assertEquals(
-      listOf("add:fresh", "remove:stale", "removeBoundary", "addBoundary:1300"),
+      listOf("removeBoundary", "add:fresh", "remove:stale", "addBoundary:1300"),
       registry.calls
     )
   }
@@ -256,7 +259,75 @@ class RotationEngineTest {
 
     // A reboot or force-stop clears the OS registry while our flags still say
     // `active = true`; a blind re-add is the only thing that resolves that (§4.6).
-    assertEquals(listOf("add:a,b", "removeBoundary"), registry.calls)
+    assertEquals(listOf("removeBoundary", "add:a,b"), registry.calls)
+  }
+
+  @Test
+  fun `a full rotation under the iOS slot cap arms the whole new set`() {
+    // Reproduces the reported bug. iOS holds at most 20 regions, so with 19 armed
+    // plus the boundary the app is already at the cap. Moving far enough that the
+    // entire set changes then asks for 19 more, and a naive add-before-remove has the
+    // OS reject nearly all of them — the symptom being only the first two or three
+    // showing as armed until the app is killed and relaunched.
+    val store = FakeGeofenceStore()
+    val old = (1..19).map { record("old$it", latitude = north(origin, 9000.0 + it).latitude, active = true) }
+    val fresh = (1..19).map { i ->
+      val at = north(origin, i * 10.0)
+      record("new$i", latitude = at.latitude, longitude = at.longitude)
+    }
+    store.seed(*old.toTypedArray(), *fresh.toTypedArray())
+
+    val registry = FakeRegionRegistry(platformMax = 20)
+    registry.seedMonitored(*old.map { it.id }.toTypedArray(), BOUNDARY_ID)
+
+    engine(store, registry, capacity = 19).applyActiveSet(
+      next = fresh,
+      boundaryRadius = 900.0,
+      center = origin,
+      forceReAddAll = false,
+    )
+
+    assertTrue(
+      "the platform rejected ${registry.rejected.size} region(s): ${registry.rejected}",
+      registry.rejected.isEmpty()
+    )
+    assertEquals(
+      "all 19 new regions plus the boundary must end up armed",
+      (fresh.map { it.id } + BOUNDARY_ID).toSet(),
+      registry.monitored.toSet()
+    )
+    assertTrue("must never exceed the platform cap", registry.monitored.size <= 20)
+  }
+
+  @Test
+  fun `slots are freed only from regions that were leaving anyway`() {
+    val store = FakeGeofenceStore()
+    // `keep` stays in the next set; `drop1`/`drop2` are on their way out.
+    val keep = record("keep", latitude = origin.latitude, longitude = origin.longitude, active = true)
+    val drop1 = record("drop1", latitude = north(origin, 8000.0).latitude, active = true)
+    val drop2 = record("drop2", latitude = north(origin, 9000.0).latitude, active = true)
+    val fresh = record("fresh", latitude = north(origin, 20.0).latitude)
+    store.seed(keep, drop1, drop2, fresh)
+
+    val registry = FakeRegionRegistry(platformMax = 4) // 3 usable + boundary
+    registry.seedMonitored("keep", "drop1", "drop2", BOUNDARY_ID)
+
+    engine(store, registry, capacity = 3).applyActiveSet(
+      next = listOf(keep, fresh),
+      boundaryRadius = 700.0,
+      center = origin,
+      forceReAddAll = false,
+    )
+
+    // The region we intend to keep is never taken down to make room, and the furthest
+    // departing region is the one sacrificed first.
+    val removeCalls = registry.calls.filter { it.startsWith("remove:") }
+    assertFalse(
+      "a region staying in the set must never be removed: $removeCalls",
+      removeCalls.any { it.contains("keep") }
+    )
+    assertTrue(registry.rejected.isEmpty())
+    assertEquals(setOf("keep", "fresh", BOUNDARY_ID), registry.monitored.toSet())
   }
 
   @Test

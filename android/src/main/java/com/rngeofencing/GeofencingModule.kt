@@ -164,6 +164,22 @@ class GeofencingModule internal constructor(private val reactContext: ReactAppli
     }
   }
 
+  /**
+   * Recent native log lines (§14).
+   *
+   * The rotation trace this returns is produced during process wakes — a broadcast
+   * receiver, or the launch re-arm — which happen *before* JS is running. Buffering
+   * natively and letting JS pull the lines is the only way to see them without
+   * attaching `logcat`.
+   */
+  @ReactMethod
+  override fun getDebugLog(promise: Promise) {
+    resolveOnExecutor(promise) {
+      val lines = Logger.snapshot()
+      Arguments.createArray().apply { lines.forEach { pushString(it) } }
+    }
+  }
+
   @ReactMethod
   override fun openSettings(promise: Promise) {
     // Exposed as its own method rather than navigated automatically: on API 30+ this

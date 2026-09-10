@@ -133,6 +133,19 @@
   // divergence that forces one on Android cannot arise here.
   NSSet<NSString *> *currentIdentifiers = [_registry monitoredIdentifiers];
 
+  // Diagnostic. `monitoredRegions` is restored asynchronously by CoreLocation, so
+  // reading it too early in a launch reports an empty set — which makes every region
+  // look unmonitored, re-registers all of them, and fires a `requestStateForRegion:`
+  // storm whose `didDetermineState` answers look like fresh crossings.
+  NSInteger storeActive = 0;
+  for (RNGeofenceRecord *record in [_store all]) {
+    if (record.active) {
+      storeActive++;
+    }
+  }
+  [RNGeofencingLogger debug:@"rotation diff: OS reports %lu monitored, store believes %ld active",
+                            (unsigned long)currentIdentifiers.count, (long)storeActive];
+
   NSMutableSet<NSString *> *nextIdentifiers = [NSMutableSet new];
   for (RNGeofenceRecord *record in next) {
     [nextIdentifiers addObject:record.identifier];
@@ -157,7 +170,59 @@
     }
   }
 
-  // ADD BEFORE REMOVE (invariant 3).
+  // Furthest-first, so that when slots have to be freed below it is the least
+  // relevant regions that go first.
+  [toRemove sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+    RNGeofenceRecord *ra = [self->_store get:a];
+    RNGeofenceRecord *rb = [self->_store get:b];
+    double da = ra != nil ? RNGeofenceHaversine(center, ra.center) : DBL_MAX;
+    double db = rb != nil ? RNGeofenceHaversine(center, rb.center) : DBL_MAX;
+    if (da > db) {
+      return NSOrderedAscending;
+    }
+    if (da < db) {
+      return NSOrderedDescending;
+    }
+    return NSOrderedSame;
+  }];
+
+  // The boundary comes down first. It is re-armed at the new centre at the end of
+  // this method anyway, and while it is registered it holds one of the 20 slots — the
+  // very slot the adds below may need.
+  [_registry removeBoundary];
+
+  // **iOS caps monitored regions at 20, and add-before-remove cannot exceed it.**
+  //
+  // Invariant 3 wants the adds first, so that a process killed between the two calls
+  // leaves a superset rather than a hole. That holds only while the superset can
+  // actually exist — and here it cannot: `startMonitoringForRegion:` past the cap is
+  // rejected outright, reported asynchronously through
+  // `monitoringDidFailForRegion:` as kCLErrorRegionMonitoringFailure, and the *new*
+  // regions are simply never armed. With 19 armed plus the boundary the app is
+  // already at the cap, so a rotation whose set changes completely would arm almost
+  // nothing until the app was killed and relaunched.
+  //
+  // So the superset is kept whenever it fits, and when it does not, exactly the
+  // shortfall is freed first — and only ever from regions that were being removed
+  // anyway. A region we intend to keep is never taken down early.
+  NSMutableSet<NSString *> *afterAdd = [currentIdentifiers mutableCopy];
+  for (RNGeofenceRecord *record in toAdd) {
+    [afterAdd addObject:record.identifier];
+  }
+  NSInteger overflow = (NSInteger)afterAdd.count - _capacity;
+
+  NSUInteger freeCount = overflow > 0 ? MIN((NSUInteger)overflow, toRemove.count) : 0;
+  if (freeCount > 0) {
+    NSArray<NSString *> *preRemove =
+        [toRemove subarrayWithRange:NSMakeRange(0, freeCount)];
+    [RNGeofencingLogger warn:@"rotation: freeing %lu slot(s) before adding — %lu armed + %lu to "
+                             @"add would exceed the platform cap of %ld",
+                             (unsigned long)freeCount, (unsigned long)currentIdentifiers.count,
+                             (unsigned long)toAdd.count, (long)(_capacity + 1)];
+    [_registry removeIdentifiers:preRemove];
+    [_store setActive:preRemove active:NO];
+  }
+
   if (toAdd.count > 0) {
     [_registry addRegions:toAdd];
     NSMutableArray<NSString *> *addedIdentifiers = [NSMutableArray new];
@@ -167,13 +232,16 @@
     [_store setActive:addedIdentifiers active:YES];
   }
 
-  if (toRemove.count > 0) {
-    [_registry removeIdentifiers:toRemove];
-    [_store setActive:toRemove active:NO];
+  // Whatever was not already freed above.
+  if (toRemove.count > freeCount) {
+    NSArray<NSString *> *deferred =
+        [toRemove subarrayWithRange:NSMakeRange(freeCount, toRemove.count - freeCount)];
+    [_registry removeIdentifiers:deferred];
+    [_store setActive:deferred active:NO];
   }
 
-  // Boundary last, and always torn down first so a stale centre cannot linger.
-  [_registry removeBoundary];
+  // Boundary last: it is the trigger for the next rotation, and re-arming it before
+  // the set is in place would race a fast-moving user.
   if (boundaryRadius != nil) {
     [_registry addBoundaryAt:center radius:boundaryRadius.doubleValue];
   }

@@ -165,6 +165,79 @@ declaration and a manual review from Google — even one that never calls the AP
 An app that only needs foreground geofencing can opt out with the plugin prop, or in a bare app
 with `tools:node="remove"` in its own manifest.
 
+## Lifecycle
+
+**`ready()` on every app start. `start()` once.**
+
+| | When to call it | Why |
+|---|---|---|
+| `ready()` | **every app start** | applies your config, flushes events buffered while JS was down, and re-arms the stored set |
+| `start()` / `stop()` | **when the user turns the feature on or off** | `enabled` is persisted; it survives every relaunch and every reboot |
+
+Treat `start()`/`stop()` as a **user-facing switch**, not a lifecycle call:
+
+```ts
+// Every app start.
+const state = await Geofencing.ready({ proximityRadius: 2000 });
+if (!state.available) return; // no Play services, or region monitoring unsupported
+
+// Only when the user flips the switch.
+const onToggle = (on: boolean) =>
+  on ? Geofencing.start() : Geofencing.stop();
+```
+
+`state.enabled` tells you where that switch currently is. Calling `start()` again is
+harmless, just wasteful: it forces an extra rotation, which may cost a fresh location
+fix.
+
+### First-time setup
+
+```ts
+Geofencing.onGeofence(handler);               // 1. subscribe first
+const state = await Geofencing.ready({ ... }); // 2. config + flush queue
+if (!state.available) return;                  // 3. bail on unsupported devices
+await Geofencing.requestPermission();          // 4. must reach 'always'
+await Geofencing.addGeofences(places);         // 5. add
+await Geofencing.start();                      // 6. arm — last
+```
+
+Steps 5 and 6 are interchangeable, but **adding before starting costs one rotation
+instead of two** — starting first rotates over an empty set and wastes a location fix.
+
+### Batch your adds
+
+Once the module is started, **every `addGeofences` call triggers a rotation**. One call
+with 300 entries rotates once; 300 calls rotate 300 times.
+
+```ts
+await Geofencing.addGeofences(places.map(toGeofence));   // ✅ one rotation
+for (const p of places) await Geofencing.addGeofence(p); // ❌ one per place
+```
+
+### Permission can arrive later
+
+`start()` **resolves** even with no permission. It simply cannot arm anything yet,
+because it has no position to compute the active set from — it logs
+`no centre, keeping the current set` and self-heals: the next rotation (permission
+granted, or the app returning to the foreground) arms everything.
+
+`E_UNAVAILABLE` — no Play services, or region monitoring unsupported — is the only
+condition you should expect `start()` to reject on. (`E_STORE` is possible too, but
+only if the device cannot write to disk at all.)
+
+### Re-arming without the app being opened
+
+Re-arming does not depend on `ready()`. Device reboot, app update and location being
+switched back on each have their own receiver on Android, and **the first rotation in
+any process re-adds the whole set unconditionally** rather than trusting what it
+believes is already armed — which is what heals a reboot or a force-stop having
+silently cleared the OS side. On iOS the core is constructed during launch, including a
+background relaunch.
+
+One asymmetry worth knowing: on Android the native module is created lazily, so nothing
+re-arms at app launch until JS touches it — which is why calling `ready()` at startup
+matters more there. On iOS it happens whether JS calls anything or not.
+
 ## Permissions
 
 ```ts
@@ -263,6 +336,7 @@ If you need a precise fix at crossing time, request one yourself in the handler.
 | `openSettings()` | The only remaining path to background location on Android 30+. |
 | `getState()` | Live, never cached. |
 | `flushQueue()` | Drains events buffered while JS was down. |
+| `getDebugLog()` | Recent native log lines, newest last. Needs `debug: true`. |
 | `onGeofence(cb)` | `{ identifier, action, timestamp, latitude?, longitude?, accuracy?, approximate, synthetic, extras? }` |
 | `onGeofencesChange(cb)` | `{ on, off }` — which regions are actually armed. |
 | `registerHeadlessTask(task)` | Android only; module scope in `index.js`. |
@@ -305,6 +379,107 @@ Every rejection carries a `code`, so you can branch on it reliably.
 
 These deliberately **do not** reject: a permission denial, location services being off, a rotation
 centre that could not be resolved, an empty geofence list, or `removeGeofences()` on nothing.
+
+## Debugging
+
+Turn on `debug: true` first. Almost every issue resolves to reading one rotation log.
+
+### What wakes the app, and what you will actually see
+
+| Cause | iOS | Android | New `onGeofence` event? |
+|---|---|---|---|
+| Enter / exit / dwell in an **armed** geofence | ✓ | ✓ | **Yes** |
+| Crossing the **boundary region** | ✓ | ✓ | No — it rotates the active set instead |
+| Significant location change (~500 m) | ✓ | — | No — a backstop trigger only |
+| Reboot, app update, location switched back on | — | ✓ | No — it re-arms |
+
+Three of the four wake your process **without producing an event**. So *moving and
+seeing no events is normal* — check whether the rotation centre and the armed set
+changed instead.
+
+And only **armed** geofences fire. One that is in the store but not currently armed is
+invisible to the OS; crossing the boundary is what arms it as you approach.
+
+### Reading the log from JS
+
+The module's log is **native**, and the most interesting lines — the launch re-arm, and
+rotations driven from a broadcast receiver or a background relaunch — are written
+**before JS is running**, so no JS logger can observe them live. They are buffered
+natively instead, and `getDebugLog()` pulls them:
+
+```ts
+const lines = await Geofencing.getDebugLog();
+console.log(lines.join('\n'));
+```
+
+Each line is `<epoch ms> <D|W|E> <message>`. Reading does not drain the buffer, so
+calling it repeatedly is safe; it holds the last 300 lines. This is what lets the log
+land in whatever JS tooling you already use — Reactotron, React Native DevTools —
+instead of needing a native log viewer.
+
+The example app dumps it automatically on startup and has a **Dump native log** button.
+
+### Reading the log natively
+
+Android — `logcat` reads the system log, so it keeps working while the app is killed:
+
+```sh
+adb logcat -s RNGeofencing
+```
+
+```
+D/RNGeofencing: boundary EXIT — rotating
+D/RNGeofencing: rotate(BOUNDARY_EXIT): 85 of 300 geofence(s) selected
+D/RNGeofencing: rotation applied: center=(59.91, 10.75) boundary=1800m on=[seed-12] off=[seed-90] synthetic=0
+D/RNGeofencing: headless service started with 1 event(s)
+```
+
+iOS, on a simulator:
+
+```sh
+xcrun simctl spawn booted log stream --predicate 'eventMessage CONTAINS "RNGeofencing"'
+```
+
+On a real device, open **Console.app**, select the device in the sidebar, and filter on
+`RNGeofencing`. Xcode cannot attach — the app is not running.
+
+One iOS line is logged **even with `debug: false`**:
+
+```
+[RNGeofencing] W relaunched by a location event — constructing the core now
+```
+
+Seeing it is proof the OS relaunched a terminated app to deliver a crossing.
+
+### Event flags
+
+| Flag | Means |
+|---|---|
+| `synthetic` | the module emitted this itself — you left a region while it was rotated out, so the OS never reported the exit |
+| `approximate` | the position was synthesised from the region centre rather than a real fix (iOS carries no location on region callbacks) |
+
+### Testing killed-app delivery
+
+**Do not use `adb shell am force-stop`.** Force-stop removes the app's geofences from
+the system, so that test cannot pass by construction. **Swipe the app away from Recents
+/ the App Switcher** instead, then move.
+
+- **Android, `enableHeadless: true`** — JS runs immediately, and a short
+  "Updating location" notification appears while it does.
+- **Android with `enableHeadless: false`, and iOS** — the event is written to disk
+  natively and delivered when the app is next opened. Compare `event.timestamp` against
+  when your JS started to tell a flushed event from a fresh one.
+
+### Symptoms and what they mean
+
+| Symptom | Usually means |
+|---|---|
+| `authorization` is not `always` | No background delivery at all. By far the most common cause |
+| Rotation centre / boundary radius stop changing as you move | Rotation has stalled — look for `boundary region could not be armed` |
+| `rotation: freeing N slot(s) before adding` | Normal. The set changed enough that the platform's slots had to be freed first |
+| `addRegions failed … left for retry` | The OS rejected a batch; those stay unarmed until the next rotation retries them |
+| `dense geofence cluster` warning | More geofences within 500 m than iOS has slots. A missed ENTER is possible — raise radii or thin the cluster |
+| Armed and unarmed geofences interleaved when sorted by distance | A rotation landed between two reads. If it persists once you stop moving, check the log for the two failures above |
 
 ## Known limits
 

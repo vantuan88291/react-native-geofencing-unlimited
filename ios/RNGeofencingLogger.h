@@ -12,6 +12,18 @@ NS_ASSUME_NONNULL_BEGIN
  */
 @interface RNGeofencingLogger : NSObject
 @property(class, nonatomic, assign) BOOL debugEnabled;
+/**
+ * Recent lines, for `getDebugLog()`.
+ *
+ * The most interesting logging this module does happens during a process wake — the
+ * launch re-arm, or a region callback in a background relaunch — which is *before* JS
+ * is running and therefore impossible to observe from a JS logger. Buffering natively
+ * and letting JS pull the lines later is what makes those visible without attaching a
+ * native log viewer. Reading does not drain, so repeated calls are safe.
+ */
++ (NSArray<NSString *> *)snapshot;
++ (void)clearSnapshot;
+
 + (void)debug:(NSString *)format, ... NS_FORMAT_FUNCTION(1, 2);
 + (void)warn:(NSString *)format, ... NS_FORMAT_FUNCTION(1, 2);
 + (void)error:(NSString *)format, ... NS_FORMAT_FUNCTION(1, 2);
