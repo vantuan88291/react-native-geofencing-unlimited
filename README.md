@@ -76,10 +76,7 @@ Minimum versions:
 
 ### Expo
 
-Expo Go **cannot** run this module — it contains custom native code. Use `expo prebuild` or EAS
-Build.
-
-Add the plugin to `app.json`:
+Expo Go **cannot** run this module — it ships native code. Use `expo prebuild` or EAS Build.
 
 ```json
 {
@@ -88,8 +85,7 @@ Add the plugin to `app.json`:
       [
         "react-native-geofencing-unlimited",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location to notify you when you arrive.",
-          "isAndroidBackgroundLocationEnabled": true
+          "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location to notify you when you arrive."
         }
       ]
     ]
@@ -97,75 +93,39 @@ Add the plugin to `app.json`:
 }
 ```
 
-That is the whole config for the **default** runtime options. `isAndroidBackgroundLocationEnabled`
-is already `true` by default and is spelled out above only for clarity. Going to call
-`ready({ enableHeadless: true })`? Then you need a third prop —
-`isAndroidForegroundServiceEnabled: true` — or your JS will not run at the crossing after all.
-The callout under the props table below spells out why.
-
-The plugin writes the `Info.plist` keys and appends `location` to `UIBackgroundModes` for you. A
-host that would rather own those can put them in `app.json` under `ios.infoPlist` and pass `false`
-for the matching props — with `prebuild` on every build, `app.json` is the natural source of truth.
-
-Plugin props:
+The plugin writes the `Info.plist` keys and appends `location` to `UIBackgroundModes`. It never
+*adds* Android permissions — the library manifest declares those and AGP merges them into your
+app — it only **removes** what you opt out of.
 
 | Prop | Default | Effect |
 |---|---|---|
-| `locationWhenInUsePermission` | a generic string | `NSLocationWhenInUseUsageDescription`; `false` skips the key |
-| `locationAlwaysAndWhenInUsePermission` | a generic string | `NSLocationAlwaysAndWhenInUseUsageDescription`; `false` skips the key |
-| `isAndroidBackgroundLocationEnabled` | `true` | `false` strips `ACCESS_BACKGROUND_LOCATION` from the merged manifest |
-| `isAndroidForegroundServiceEnabled` | `false` | `true` keeps the foreground-service permissions; only needed with `enableHeadless: true` |
+| `locationWhenInUsePermission` | generic string | `NSLocationWhenInUseUsageDescription`; `false` skips the key |
+| `locationAlwaysAndWhenInUsePermission` | generic string | `NSLocationAlwaysAndWhenInUseUsageDescription`; `false` skips the key |
+| `isAndroidBackgroundLocationEnabled` | `true` | `false` strips `ACCESS_BACKGROUND_LOCATION` |
+| `isAndroidForegroundServiceEnabled` | `false` | `true` keeps `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `POST_NOTIFICATIONS`, `WAKE_LOCK` |
 
-> **Using `enableHeadless: true`? You must also pass `isAndroidForegroundServiceEnabled: true`.**
+> **`enableHeadless: true` also needs `isAndroidForegroundServiceEnabled: true`.** One is a
+> runtime argument, the other is stripped at *build* time, so only the running app can compare
+> them — `ready()` does, and logs `MISCONFIGURED:` on the first mismatch. Without the permissions
+> the headless service cannot start and events wait for the next launch.
 >
-> Not a style preference — that prop is what keeps `FOREGROUND_SERVICE`,
-> `FOREGROUND_SERVICE_LOCATION`, `POST_NOTIFICATIONS` and `WAKE_LOCK` in your manifest, and
-> React Native acquires a wake lock before your headless task runs. Strip them while
-> `enableHeadless` is still `true` and the module logs an error and leaves the events queued
-> rather than starting a service it knows will fail.
->
-> The two are set in different places and neither knows about the other: `enableHeadless` is
-> a runtime argument to `ready()`, while these permissions are stripped from the merged
-> manifest at *build* time by this plugin, which defaults to removing them. Nothing can
-> compare them until the app runs — so `ready()` does it, and logs a `MISCONFIGURED:` line
-> the first time you call it with `enableHeadless: true` and no `WAKE_LOCK`. If you have
-> `debug: true` on, that line is also in `getDebugLog()`.
->
-> The full copy-paste for the headless case:
->
-> ```json
-> {
->   "expo": {
->     "plugins": [
->       [
->         "react-native-geofencing-unlimited",
->         {
->           "locationAlwaysAndWhenInUsePermission": "Allow $(PRODUCT_NAME) to use your location to notify you when you arrive.",
->           "isAndroidForegroundServiceEnabled": true
->         }
->       ]
->     ]
->   }
-> }
-> ```
->
-> This is deliberately **not** the default above, and the prop is not free: it keeps
-> `FOREGROUND_SERVICE_LOCATION`, and Google Play requires every app carrying that permission
-> to declare its foreground-service use case in the Play Console. Turn it on because you
-> want headless delivery, not as insurance.
+> Not free, either: `FOREGROUND_SERVICE_LOCATION` obliges a foreground-service declaration in the
+> Play Console. Turn it on for headless delivery, not as insurance.
 
-**`compileSdk >= 34`:** set it with
-[`expo-build-properties`](https://docs.expo.dev/versions/latest/sdk/build-properties/), not by
-editing gradle. The plugin deliberately does not patch `compileSdkVersion` — Expo pins it per SDK
-version, and a plugin that rewrites it fights that pin and breaks on upgrade.
+Already own your permission strings — in `ios.infoPlist`, or through `expo-location`? Pass
+`false` for the matching props here so this plugin skips those keys. Mind the asymmetry: `false`
+on **this** plugin means *skip the key*, while `false` on `expo-location` means *delete it*.
+Where two plugins both pass an explicit string, the one listed **first** wins.
+
+**`compileSdk >= 34`** goes through
+[`expo-build-properties`](https://docs.expo.dev/versions/latest/sdk/build-properties/), never a
+gradle edit — Expo pins it per SDK version and a plugin that rewrites it breaks on upgrade.
 
 ```json
 ["expo-build-properties", { "android": { "compileSdkVersion": 34, "targetSdkVersion": 34 } }]
 ```
 
-**The iOS launch hook is automatic, and stays automatic across Expo SDK upgrades.** See
-[the launch hook](#the-ios-launch-hook) — there is nothing for you to do, and nothing for an SDK
-bump to break.
+The [iOS launch hook](#the-ios-launch-hook) needs nothing from you and survives SDK bumps.
 
 ### Bare React Native CLI
 
@@ -185,16 +145,15 @@ the Expo plugin would otherwise have written for you:
 <array><string>location</string></array>
 ```
 
-Then `cd ios && pod install`. See `example/ios/GeofencingExample/Info.plist` for a working copy.
+Then `cd ios && pod install`. `example/ios/GeofencingExample/Info.plist` is a working copy.
 
-Android needs nothing: the library's manifest declares its own permissions, receivers and service,
-and AGP merges them into your app. Minification is handled too — the library ships
-`consumer-rules.pro`, which R8 applies automatically, so nothing has to be added to your
-own `proguard-rules.pro`. Two of its components are addressed by name at runtime, and
-renaming either would stop delivery in release builds only.
+Android needs nothing: the library manifest declares its own permissions, receivers and service and
+AGP merges them into your app. Minification is covered too — the shipped `consumer-rules.pro` is
+applied by R8 automatically, and it matters because two components are addressed by name at runtime
+and renaming either would break delivery in release builds only.
 
-**Do not** add a `didFinishLaunchingWithOptions` snippet from another library's README. This module
-does not need one — see below.
+**Do not** paste a `didFinishLaunchingWithOptions` snippet from another library's README. This
+module does not need one — see below.
 
 ### The iOS launch hook
 
@@ -203,244 +162,149 @@ that pending event **only to a `CLLocationManager` delegate that already exists*
 manager lazily when JS calls `ready()` is far too late, and the failure is completely silent: no
 crash, no log, just no events.
 
-This library installs that hook itself, from `+load` in `RNGeofencingCore.mm`, using
-`UIApplicationDidFinishLaunchingNotification`.
-
-**So: nothing for a host app to do, on either workflow.** No `AppDelegate` edit that an
-`expo prebuild` would wipe, no regex anchor for an Expo SDK bump to silently stop matching, and no
-`expo-modules-core` dependency landing on React Native CLI consumers.
+This library installs that hook itself, from `+load` in `RNGeofencingCore.mm` via
+`UIApplicationDidFinishLaunchingNotification` — so there is **nothing for a host app to do** on
+either workflow. No `AppDelegate` edit for an `expo prebuild` to wipe, no regex anchor for an Expo
+SDK bump to silently stop matching, and no `expo-modules-core` dependency landing on React Native
+CLI consumers.
 
 ### Google Play background-location declaration
 
 Any app whose **merged** manifest requests `ACCESS_BACKGROUND_LOCATION` needs a background-location
 declaration and a manual review from Google — even one that never calls the API. Keeping
-`isAndroidBackgroundLocationEnabled: true` (the default) means you will need that declaration.
-
-An app that only needs foreground geofencing can opt out with the plugin prop, or in a bare app
-with `tools:node="remove"` in its own manifest.
+`isAndroidBackgroundLocationEnabled: true` (the default) means you will need it. An app that only
+needs foreground geofencing opts out with that plugin prop, or with `tools:node="remove"` in a bare
+app's own manifest.
 
 ## Lifecycle
 
-**`ready()` on every app start. `start()` once.**
+**`ready()` on every app start. `start()` once** — it is a user-facing switch, not a lifecycle call.
 
 | | When to call it | Why |
 |---|---|---|
-| `ready()` | **every app start** | applies your config, flushes events buffered while JS was down, and re-arms the stored set |
+| `ready()` | **every app start** | applies your config, flushes events buffered while JS was down, re-arms the stored set |
 | `start()` / `stop()` | **when the user turns the feature on or off** | `enabled` is persisted; it survives every relaunch and every reboot |
-
-Treat `start()`/`stop()` as a **user-facing switch**, not a lifecycle call:
-
-```ts
-// Every app start.
-const state = await Geofencing.ready({ proximityRadius: 2000 });
-if (!state.available) return; // no Play services, or region monitoring unsupported
-
-// Only when the user flips the switch.
-const onToggle = (on: boolean) =>
-  on ? Geofencing.start() : Geofencing.stop();
-```
-
-`state.enabled` tells you where that switch currently is. Calling `start()` again is
-harmless, just wasteful: it forces an extra rotation, which may cost a fresh location
-fix.
 
 ### Setup — safe to run on every launch
 
 ```ts
-Geofencing.onGeofence(handler);                 // 1. subscribe first
+const sub = Geofencing.onGeofence(handler);     // 1. subscribe first
 const state = await Geofencing.ready({ ... });  // 2. config + flush queue
 if (!state.available) return;                   // 3. bail on unsupported devices
-if (state.authorization !== 'always') {         // 4. must reach 'always'
+if (state.authorization !== 'always') {         // 4. ask only when needed
   await Geofencing.requestPermission();
 }
-await Geofencing.addGeofences(places);          // 5. add
+await Geofencing.addGeofences(places);          // 5. add — batched, never in a loop
 if (!state.enabled) await Geofencing.start();   // 6. arm — only if not already armed
 ```
 
-Step 4 is guarded because an unconditional call is **not** free once the user has
-settled on "While Using the App" — the common case. On iOS `requestAlwaysAuthorization`
-is a one-shot per install; after it has been spent the call does nothing and fires no
-delegate callback, so the promise waits out its 30-second backstop *on every launch* —
-stalling everything after it. On Android API 30+ the background rationale dialog is
-shown again on every launch. Better still, ask behind a user action or a screen that
-explains the benefit: that is what Play policy expects, and it is granted far more often.
+Why the two guards:
 
-Step 6 is guarded because **`enabled` is persisted by the module**. Calling `start()`
-unconditionally on every launch costs an extra rotation, and — once you add a settings
-toggle — silently switches the feature back on for a user who turned it off.
+| Guard | Without it |
+|---|---|
+| `authorization !== 'always'` | **iOS**: `requestAlwaysAuthorization` is a one-shot per install; once spent it fires no callback, so the promise waits out its 30-second backstop *on every launch* and stalls everything after it. **Android 30+**: the rationale dialog reappears every launch |
+| `!state.enabled` | One wasted rotation per launch — and once you add a settings toggle, the feature silently switches back on for a user who turned it off |
 
-Do **not** keep your own "have I started yet?" flag in AsyncStorage. It duplicates state
-the module already owns, and the two drift apart the first time anything calls `stop()`:
-your flag still says started, `enabled` says stopped, and nothing ever arms again.
-`ready()` hands you the real answer in its return value.
+Better still, ask for permission behind a user action that explains the benefit: Play policy
+expects the rationale first, and it is granted far more often.
 
-Steps 5 and 6 are interchangeable, but **adding before starting costs one rotation
-instead of two** — starting first rotates over an empty set and wastes a location fix.
+Don't keep your own "have I started yet?" flag — it duplicates `enabled` and drifts the moment
+anything calls `stop()`. The toggle reads the same value:
 
-### Removing a listener
+```ts
+const onToggle = (on: boolean) => (on ? Geofencing.start() : Geofencing.stop());
+```
 
-`onGeofence` and `onGeofencesChange` both return a `Subscription`. Remove it when the
-component that owns it goes away:
+Steps 5 and 6 are interchangeable, but adding first costs **one rotation instead of two**, and
+every `addGeofences` call rotates — so batch them rather than looping.
+
+### Listeners
 
 ```ts
 useEffect(() => {
-  const sub = Geofencing.onGeofence(handleGeofenceEvent);
-  return () => sub.remove();
+  const sub = Geofencing.onGeofence(handler);
+  return () => sub.remove(); // skip this and Fast Refresh stacks duplicates: handler fires twice
 }, []);
 ```
 
-Skip this and Fast Refresh or a remount stacks a second listener on the same event —
-your handler runs twice per crossing, and if it calls an API, so does that.
+`remove()` does **not** stop delivery. Events arriving with no listener are buffered in JS (last
+200) and replayed to the next subscriber, so a remount loses nothing — but that buffer dies with
+the process, because those events were never written to the native queue. If a crossing must not
+be lost, keep **one** listener alive for the whole process, in a component that never unmounts,
+and let it persist the event before anything else.
 
-**Removing a listener does not stop delivery.** The module keeps its native
-subscription for the lifetime of the JS context, and events that arrive with no
-listener attached are held (bounded at 200) and replayed to the next subscriber. So a
-remount loses nothing.
+### Things that happen without you
 
-What that buffer will not survive is the process being killed: events held for a
-missing listener were never written to the native queue, because native could see a
-live JS context and delivered to it. If losing a crossing is not acceptable — you are
-reporting arrivals to a backend, say — keep **one** listener alive for the whole
-process rather than only inside a screen: register it in a top-level component that
-never unmounts, and let that handler persist the event before anything else. Screens
-can then read from your own store instead of subscribing.
+`start()` resolves with no permission — it simply cannot arm yet, logs
+`no centre, keeping the current set`, and self-heals on the next rotation. `E_UNAVAILABLE` (no Play
+services, or region monitoring unsupported) is the only rejection to expect.
 
-### Batch your adds
-
-Once the module is started, **every `addGeofences` call triggers a rotation**. One call
-with 300 entries rotates once; 300 calls rotate 300 times.
-
-```ts
-await Geofencing.addGeofences(places.map(toGeofence));   // ✅ one rotation
-for (const p of places) await Geofencing.addGeofence(p); // ❌ one per place
-```
-
-### Permission can arrive later
-
-`start()` **resolves** even with no permission. It simply cannot arm anything yet,
-because it has no position to compute the active set from — it logs
-`no centre, keeping the current set` and self-heals: the next rotation (permission
-granted, or the app returning to the foreground) arms everything.
-
-`E_UNAVAILABLE` — no Play services, or region monitoring unsupported — is the only
-condition you should expect `start()` to reject on. (`E_STORE` is possible too, but
-only if the device cannot write to disk at all.)
-
-### Re-arming without the app being opened
-
-Re-arming does not depend on `ready()`. Device reboot, app update and location being
-switched back on each have their own receiver on Android, and **the first rotation in
-any process re-adds the whole set unconditionally** rather than trusting what it
-believes is already armed — which is what heals a reboot or a force-stop having
-silently cleared the OS side. On iOS the core is constructed during launch, including a
-background relaunch.
-
-One asymmetry worth knowing: on Android the native module is created lazily, so nothing
-re-arms at app launch until JS touches it — which is why calling `ready()` at startup
-matters more there. On iOS it happens whether JS calls anything or not.
+Re-arming does not need `ready()`. Reboot, app update and location switched back on each have their
+own Android receiver, and **the first rotation in any process re-adds the whole set
+unconditionally** rather than trusting its own flags — which is what heals a reboot or force-stop
+that silently cleared the OS side. On iOS the core is built during launch, background relaunches
+included; on Android the module is created lazily, so nothing re-arms until JS touches it, which is
+why calling `ready()` at startup matters more there.
 
 ## Permissions
 
 ```ts
-// A denial RESOLVES with the resulting state — it does not reject.
+// A denial RESOLVES with the resulting state — it never rejects.
 // Branch on the state, never on a catch.
 const state = await Geofencing.requestPermission();
-
 if (state.authorization !== 'always') {
-  Alert.alert(
-    'Background location needed',
-    'Geofences only fire in the background with "Allow all the time".',
-    [
-      { text: 'Not now', style: 'cancel' },
-      { text: 'Open settings', onPress: () => Geofencing.openSettings() },
-    ]
-  );
+  // ... offer Geofencing.openSettings()
 }
 ```
 
-**The second prompt is raised for you on both platforms.** iOS asks for `always` with
-a second *system* dialog. Android has no equivalent, and what it does instead is worse
-than nothing: from **API 30, `requestPermissions(ACCESS_BACKGROUND_LOCATION)` shows no
-dialog at all** — it drops the user straight onto the app's location settings page,
-with no explanation of why they were sent there.
-
-So on API 30+ the module shows its own dialog giving the reason first, and makes that
-system call only if the user accepts — which then lands them exactly where they need to
-be: the app's **location permission** page, with "Allow all the time" right there. That
-navigation is the only public way to reach that screen; the app-details page buries it
-three taps deep under Permissions › Location, and is used only as a fallback.
-
-On API 29 — the one version whose system dialog really does offer "Allow all the
-time" — the system is still allowed to ask directly.
-
-Customise the copy, or turn it off, from `ready()`:
+**The second prompt is raised for you on both platforms.** iOS asks for `always` with a second
+system dialog. Android has none: from API 30 `requestPermissions(ACCESS_BACKGROUND_LOCATION)` shows
+**no dialog at all**, it drops the user onto the app's location settings page with no word about
+why. So the module gives the reason in its own dialog first and makes that call only on accept —
+the only public route to that screen. API 29 is left to ask directly; its system dialog really does
+offer "Allow all the time".
 
 ```ts
 await Geofencing.ready({
   androidBackgroundPermissionRationale: {
     title: 'Cần vị trí nền',
-    message:
-      'Ứng dụng chỉ nhận biết bạn đến và rời khỏi địa điểm khi đã đóng nếu bạn ' +
-      'chọn "Luôn cho phép". Android chỉ cho bật mục này trong Cài đặt.',
+    message: 'Ứng dụng chỉ nhận biết bạn đến và rời khỏi địa điểm khi đã đóng nếu bạn chọn "Luôn cho phép".',
     positiveButton: 'Mở cài đặt',
     negativeButton: 'Để sau',
   },
+  // ...or `false` to drive the whole flow yourself with getState() + openSettings().
 });
 ```
 
-```ts
-// Or drive the whole flow yourself with getState() + openSettings().
-await Geofencing.ready({ androidBackgroundPermissionRationale: false });
-```
-
-The default copy is English, so **supply your own strings if your app is not**. Play
-Store policy expects the *reason* to be stated before the user is sent to Settings,
-which is what this dialog is for — keep that in whatever wording you choose.
-
-Two rules that are easy to get wrong:
-
-- **Show your rationale before calling `requestPermission()`.** Play Store policy does not accept
-  one shown afterwards.
-- **Re-check on every resume.** Users revoke in Settings, and Android 11+ auto-revokes permissions
-  for unused apps. `getState()` always reads the live grant, never a cached value.
-
-What is actually required on Android:
+The default copy is English — **supply your own if your app is not**, and keep the *reason* in
+whatever wording you choose: Play policy expects it stated before the user reaches Settings.
 
 | API level | Needed for background geofencing |
 |---|---|
-| ≤ 28 | `ACCESS_FINE_LOCATION` only — background is implicit |
+| ≤ 28 | `ACCESS_FINE_LOCATION` — background is implicit |
 | 29 | fine **+** `ACCESS_BACKGROUND_LOCATION`, requestable in one dialog |
 | 30+ | the same two, but in **separate** requests, foreground first |
-| 31+ | coarse must be requested alongside fine; an *approximate*-only grant is **not** sufficient |
-| 33+ | `POST_NOTIFICATIONS`, only when `enableHeadless: true` |
-| any | `WAKE_LOCK`, only when `enableHeadless: true` — React Native's `HeadlessJsTaskService` acquires a wake lock before your task runs |
+| 31+ | coarse must accompany fine; an *approximate*-only grant is **not** sufficient |
+| 33+ | `POST_NOTIFICATIONS`, only with `enableHeadless: true` |
+| any | `WAKE_LOCK`, only with `enableHeadless: true` — React Native takes one before your task runs |
 
-`requestPermission()` stages all of that for you. An approximate-only grant is reported as
+`requestPermission()` stages all of that. An approximate-only grant reports as
 `authorization: 'denied'` with `accuracyAuthorization: 'reduced'` — geofencing needs precise
-location, and reporting it as success would be a lie.
+location, and calling that success would be a lie.
+
+- **Show your rationale before calling `requestPermission()`.** Play policy does not accept one shown afterwards.
+- **Re-check on every resume.** Users revoke in Settings, and Android 11+ auto-revokes for unused apps. `getState()` always reads the live grant.
 
 ## Killed-app delivery
 
 | | Behaviour |
 |---|---|
-| **Android**, `enableHeadless: false` (default) | the process is still woken and the crossing is still detected, stored and rotated on — natively. Your JS is what waits: events flush the next time the app opens. No service, no notification, no `FOREGROUND_SERVICE_LOCATION`. |
-| **Android**, `enableHeadless: true` | a short-lived foreground service runs your JS task per event. Costs a low-importance notification for a few seconds. |
-| **iOS** | the OS relaunches the app in the background. There is **no headless JS**; events are persisted natively and flushed once JS subscribes. |
+| **Android**, `enableHeadless: false` (default) | the process is woken and the crossing is detected, stored and rotated on — all natively. Only your JS waits: events flush the next time the app opens. No service, no notification, no `FOREGROUND_SERVICE_LOCATION`. |
+| **Android**, `enableHeadless: true` | a short-lived foreground service runs your JS task per event, at the cost of a low-importance notification for a few seconds. |
+| **iOS** | the OS relaunches the app in the background. There is **no headless JS** and no equivalent to add; events are persisted natively and flushed once JS subscribes. |
 
 `enableHeadless: false` is the single biggest simplification available — take it if your app can
-tolerate delayed delivery.
-
-### What `enableHeadless: false` does *not* turn off
-
-It does not stop the OS waking your app. The geofence broadcast still starts your process
-(with no UI) and the whole native side still runs: the transition is de-duplicated by the
-gate, the state and the event are committed to disk, and **the active set is still rotated**.
-That last one matters most — rotation is what keeps the armed set correct as the user moves,
-and if it stopped while the app was closed, geofencing would break entirely a kilometre later.
-
-The only thing `false` defers is **your JavaScript**. No bridge boot, no
-`registerHeadlessTask`. And `event.timestamp` is the moment of the crossing, not the moment
-of the flush, so a late event is still an accurate one.
+tolerate delayed delivery. What it defers is **your JavaScript**, nothing else:
 
 | | `false` (default) | `true` |
 |---|---|---|
@@ -448,63 +312,42 @@ of the flush, so a late event is still an accurate one.
 | Crossing detected, nothing lost | yes | yes |
 | Active set rotated | yes | yes |
 | Your JS runs *at* the crossing | no — on next launch | yes |
-| Short "Updating location" notification | no | yes, per event |
+| "Updating location" notification | no | yes, per event |
 
-### `enableHeadless` is Android-only, and that means platforms diverge
+Rotation is the row that matters most: it keeps the armed set correct as the user moves, and if
+it stopped while the app was closed, geofencing would break entirely a kilometre later.
 
-There is no headless JS on iOS and no equivalent to add. iOS always behaves like Android with
-`enableHeadless: false`: the OS relaunches the app in the background, the event is committed
-natively, and JS receives it once it subscribes — which on a background relaunch may be inside
-a ~10 s budget that an RN cold start can exceed, so it is never something to rely on.
+`event.timestamp` is when the OS **reported** the crossing, not when your code received it — so a
+flushed event is still accurately stamped. It is not the instant the boundary was physically
+crossed; that lag is the platform's, and on Android it can be minutes
+([Known limits](#known-limits)).
 
-So an app that reacts at the moment of arrival gets **different behaviour per platform**:
-immediate on Android with `enableHeadless: true`, deferred on iOS. That is a platform limit,
-not a bug. If you need the same behaviour on both, do the reacting server-side — the event is
-on disk natively the instant it happens, whether or not any JS ran, so uploading from
-whichever path wakes first and pushing from your backend is the only route to true parity.
-
-**On Expo, `enableHeadless: true` also needs `isAndroidForegroundServiceEnabled: true`**
-in the plugin props — see [Expo](#expo). The plugin strips the foreground-service
-permissions by default, and without them the service cannot start.
+**`enableHeadless` is Android-only, so the platforms diverge.** iOS always behaves like Android
+with `false`. An app that reacts at the moment of arrival is therefore immediate on Android with
+`enableHeadless: true` and deferred on iOS — a platform limit, not a bug. For true parity, react
+server-side: the event is on disk natively the instant it happens, whether or not JS ran.
 
 For `enableHeadless: true`, register the task at **module scope in `index.js`**, outside the React
-tree — the headless bundle runs before any component mounts:
+tree — the headless bundle runs before any component mounts — and on Expo pass
+`isAndroidForegroundServiceEnabled: true` (see [Expo](#expo)).
 
 ```js
 // index.js
-import { Geofencing } from 'react-native-geofencing-unlimited';
-
-Geofencing.registerHeadlessTask(async (event) => {
-  await recordArrival(event); // must not depend on your React tree
-});
-
-AppRegistry.registerComponent(appName, () => App);
+Geofencing.registerHeadlessTask(handleGeofenceEvent); // must not touch your React tree
 ```
 
-**On iOS, assume JS will not run.** The OS gives a relaunched app roughly 10 seconds of background
-time, which is often less than a React Native cold start. Anything your app depends on must be
-updated natively, in the store, before JS is involved — which is exactly what this module does.
+Use the **same handler** for `registerHeadlessTask` and `onGeofence`. An event reaches exactly
+one of them, never both, and you cannot tell in advance which — it depends on whether your JS
+happened to be alive. Write it for the stricter of the two (headless: no React tree, 30-second
+budget) and it is correct in both.
 
 ## `event.location` is best-effort
 
-This is the one real behavioural difference from `react-native-background-geolocation`.
-
-Android carries the triggering location on the event. **iOS does not** — `didEnterRegion` gives
-only the region. The module falls back to the last known fix, and then to the region centre, and
-sets `approximate: true` when it had to synthesise one.
-
-```ts
-Geofencing.onGeofence((event) => {
-  if (event.approximate) {
-    // position was synthesised from the region centre; accuracy ≈ the radius
-  }
-  if (event.synthetic) {
-    // the module emitted this itself: you left a region while it was rotated out
-  }
-});
-```
-
-If you need a precise fix at crossing time, request one yourself in the handler.
+The one real behavioural difference from `react-native-background-geolocation`. Android carries the
+triggering location on the event; **iOS does not** — `didEnterRegion` gives only the region. The
+module falls back to the last known fix, then to the region centre, setting `approximate: true`
+when it had to synthesise one. Check that flag before trusting the coordinates, and request your
+own fix inside the handler if you need a precise one.
 
 ## API
 
@@ -578,92 +421,68 @@ Turn on `debug: true` first. Almost every issue resolves to reading one rotation
 | Significant location change (~500 m) | ✓ | — | No — a backstop trigger only |
 | Reboot, app update, location switched back on | — | ✓ | No — it re-arms |
 
-Three of the four wake your process **without producing an event**. So *moving and
-seeing no events is normal* — check whether the rotation centre and the armed set
-changed instead.
+Three of the four wake your process **without producing an event**, so *moving and seeing no
+events is normal* — check whether the rotation centre and the armed set changed instead. And only
+**armed** geofences fire: one sitting in the store unarmed is invisible to the OS until a boundary
+crossing arms it as you approach.
 
-And only **armed** geofences fire. One that is in the store but not currently armed is
-invisible to the OS; crossing the boundary is what arms it as you approach.
+### Reading the log
 
-### Reading the log from JS
-
-The module's log is **native**, and the most interesting lines — the launch re-arm, and
-rotations driven from a broadcast receiver or a background relaunch — are written
-**before JS is running**, so no JS logger can observe them live. They are buffered
-natively instead, and `getDebugLog()` pulls them:
+The log is **native**. The most interesting lines — the launch re-arm, and rotations driven from a
+broadcast receiver or a background relaunch — are written **before JS is running**, so no JS
+logger can see them live. They are buffered natively, and `getDebugLog()` pulls them into whatever
+tooling you already use:
 
 ```ts
-const lines = await Geofencing.getDebugLog();
-console.log(lines.join('\n'));
+const lines = await Geofencing.getDebugLog(); // last 300; reading does not drain
 ```
 
-Each line is `<epoch ms> <D|W|E> <message>`. Reading does not drain the buffer, so
-calling it repeatedly is safe; it holds the last 300 lines. This is what lets the log
-land in whatever JS tooling you already use — Reactotron, React Native DevTools —
-instead of needing a native log viewer.
+Each line is `<epoch ms> <D|W|E> <message>`. The example app dumps it on startup and has a
+**Dump native log** button.
 
-The example app dumps it automatically on startup and has a **Dump native log** button.
-
-### Reading the log natively
-
-Android — `logcat` reads the system log, so it keeps working while the app is killed:
+Natively, which keeps working while the app is killed:
 
 ```sh
-adb logcat -s RNGeofencing
+adb logcat -s RNGeofencing                                                               # Android
+xcrun simctl spawn booted log stream --predicate 'eventMessage CONTAINS "RNGeofencing"'  # iOS sim
 ```
+
+On a real iOS device use **Console.app**, select the device in the sidebar and filter on
+`RNGeofencing` — Xcode cannot attach, because the app is not running.
 
 ```
 D/RNGeofencing: boundary EXIT — rotating
 D/RNGeofencing: rotate(BOUNDARY_EXIT): 85 of 300 geofence(s) selected
 D/RNGeofencing: rotation applied: center=(59.91, 10.75) boundary=1800m on=[seed-12] off=[seed-90] synthetic=0
-D/RNGeofencing: headless service started with 1 event(s)
 ```
 
-iOS, on a simulator:
-
-```sh
-xcrun simctl spawn booted log stream --predicate 'eventMessage CONTAINS "RNGeofencing"'
-```
-
-On a real device, open **Console.app**, select the device in the sidebar, and filter on
-`RNGeofencing`. Xcode cannot attach — the app is not running.
-
-One iOS line is logged **even with `debug: false`**:
+One iOS line is logged **even with `debug: false`**. Seeing it is proof the OS relaunched a
+terminated app to deliver a crossing:
 
 ```
 [RNGeofencing] W relaunched by a location event — constructing the core now
 ```
 
-Seeing it is proof the OS relaunched a terminated app to deliver a crossing.
-
-### Event flags
-
-| Flag | Means |
-|---|---|
-| `synthetic` | the module emitted this itself — you left a region while it was rotated out, so the OS never reported the exit |
-| `approximate` | the position was synthesised from the region centre rather than a real fix (iOS carries no location on region callbacks) |
-
 ### Testing killed-app delivery
 
-**Do not use `adb shell am force-stop`.** Force-stop removes the app's geofences from
-the system, so that test cannot pass by construction. **Swipe the app away from Recents
-/ the App Switcher** instead, then move.
-
-- **Android, `enableHeadless: true`** — JS runs immediately, and a short
-  "Updating location" notification appears while it does.
-- **Android with `enableHeadless: false`, and iOS** — the event is written to disk
-  natively and delivered when the app is next opened. Compare `event.timestamp` against
-  when your JS started to tell a flushed event from a fresh one.
+**Do not use `adb shell am force-stop`** — it removes the app's geofences from the system, so the
+test cannot pass by construction. **Swipe the app away from Recents / the App Switcher** instead,
+then move. With `enableHeadless: true` your JS runs immediately behind a short notification;
+otherwise the event is written to disk and delivered on the next launch. Compare `event.timestamp`
+against when your JS started to tell a flushed event from a fresh one.
 
 ### Symptoms and what they mean
 
 | Symptom | Usually means |
 |---|---|
 | `authorization` is not `always` | No background delivery at all. By far the most common cause |
+| `synthetic: true` on an event | The module emitted it, not the OS — you left a region while it was rotated out, so the exit was never reported |
+| `approximate: true` on an event | Position synthesised from the region centre rather than a real fix (iOS carries no location on region callbacks) |
 | Rotation centre / boundary radius stop changing as you move | Rotation has stalled — look for `boundary region could not be armed` |
 | `rotation: freeing N slot(s) before adding` | Normal. The set changed enough that the platform's slots had to be freed first |
 | `addRegions failed … left for retry` | The OS rejected a batch; those stay unarmed until the next rotation retries them |
 | `dense geofence cluster` warning | More geofences within 500 m than iOS has slots. A missed ENTER is possible — raise radii or thin the cluster |
+| `MISCONFIGURED: … WAKE_LOCK` | `enableHeadless: true` without the permissions it needs — see [Expo](#expo) |
 | Armed and unarmed geofences interleaved when sorted by distance | A rotation landed between two reads. If it persists once you stop moving, check the log for the two failures above |
 
 ## Known limits
