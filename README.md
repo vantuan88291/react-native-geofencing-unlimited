@@ -8,8 +8,10 @@
 Unlimited circular geofences for React Native, with background and killed-app delivery.
 
 Wakes your app when the user enters or leaves one of your circles — even if the app has been
-swiped away or the device has rebooted. Nothing else: no continuous location stream, no motion
-recognition, no trip recording, no upload queue, and **no always-on notification**.
+swiped away or the device has rebooted. Nothing else, by design: no polygon geofences, no
+continuous location stream, no motion or activity recognition, no trip recording, no upload queue,
+no scheduling, and **no always-on notification**. Need a location stream too? Add a plain location
+module alongside — this one stays small on purpose.
 
 Works with both the **React Native CLI** and **Expo** (prebuild / EAS Build), under both the New
 Architecture and the legacy bridge.
@@ -343,11 +345,11 @@ budget) and it is correct in both.
 
 ## `event.location` is best-effort
 
-The one real behavioural difference from `react-native-background-geolocation`. Android carries the
-triggering location on the event; **iOS does not** — `didEnterRegion` gives only the region. The
-module falls back to the last known fix, then to the region centre, setting `approximate: true`
-when it had to synthesise one. Check that flag before trusting the coordinates, and request your
-own fix inside the handler if you need a precise one.
+The one place the two platforms genuinely diverge. Android carries the triggering location on the
+event; **iOS does not** — `didEnterRegion` gives only the region. The module falls back to the last
+known fix, then to the region centre, setting `approximate: true` when it had to synthesise one.
+Check that flag before trusting the coordinates, and request your own fix inside the handler if you
+need a precise one.
 
 ## API
 
@@ -509,32 +511,6 @@ Most support questions land here.
 **iOS file protection:** if your app raises its data-protection class to
 `NSFileProtectionComplete`, this module's `UserDefaults` reads can fail while the device is locked.
 The default (`…CompleteUntilFirstUserAuthentication`) is fine.
-
-## Migrating from `react-native-background-geolocation`
-
-For a project using the paid library for geofencing only.
-
-| Before | After |
-|---|---|
-| `BackgroundGeolocation.ready(config)` | `Geofencing.ready({ proximityRadius, initialTriggerEntry })` |
-| `BackgroundGeolocation.startGeofences()` | `Geofencing.start()` |
-| `BackgroundGeolocation.stop()` | `Geofencing.stop()` |
-| `BackgroundGeolocation.addGeofences(list)` | `Geofencing.addGeofences(list)` — same object shape |
-| `BackgroundGeolocation.getGeofences()` | `Geofencing.getGeofences()` |
-| `BackgroundGeolocation.removeGeofences()` | `Geofencing.removeGeofences()` |
-| `BackgroundGeolocation.onGeofence(cb)` | `Geofencing.onGeofence(cb)` |
-| `BackgroundGeolocation.onGeofencesChange(cb)` | `Geofencing.onGeofencesChange(cb)` |
-| `config.geofenceProximityRadius` | `config.proximityRadius` |
-| `config.geofenceInitialTriggerEntry` | `config.initialTriggerEntry` |
-| `BackgroundGeolocation.registerHeadlessTask` | `Geofencing.registerHeadlessTask` (geofence events only) |
-| `event.location` (always present) | `event.latitude` / `longitude` / `accuracy`, **may be absent or approximate** |
-
-`event.location` is the only behavioural break. **Audit every geofence handler for code that
-assumes a precise fix on the event.**
-
-Not provided, by design: polygon geofences, continuous location streaming, motion/activity
-recognition, trip recording, HTTP upload, and scheduling. If you need a location stream, add a
-separate plain location module — the whole point of this one is that it stays small.
 
 ## Example app
 
