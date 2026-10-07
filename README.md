@@ -1,7 +1,3 @@
-
-
-https://github.com/user-attachments/assets/0632ed39-031f-4ae8-8fde-5de8bc86a987
-
 # react-native-geofencing-unlimited
 
 [![npm version](https://img.shields.io/npm/v/react-native-geofencing-unlimited.svg?style=flat-square)](https://www.npmjs.com/package/react-native-geofencing-unlimited)
@@ -10,6 +6,10 @@ https://github.com/user-attachments/assets/0632ed39-031f-4ae8-8fde-5de8bc86a987
 [![platforms](https://img.shields.io/badge/platforms-ios%20%7C%20android-lightgrey.svg?style=flat-square)](#install)
 
 Unlimited circular geofences for React Native, with background and killed-app delivery.
+
+<a href="https://youtu.be/0h7doUgcFS8">
+  <img src="https://img.youtube.com/vi/0h7doUgcFS8/maxresdefault.jpg" width="560" alt="Demo video">
+</a>
 
 Wakes your app when the user enters or leaves one of your circles — even if the app has been
 swiped away or the device has rebooted. Nothing else, by design: no polygon geofences, no
